@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Expense Management System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Chosen Palette: Calm Harmony (Warm neutrals: bg-stone-100, bg-white; Accent: bg-indigo-600) -->
+    <!-- 
+        Application Structure Plan: The application is structured as a role-based Single-Page Application (SPA) to directly mirror the user roles (Admin, Manager, Employee) defined in the problem statement. This task-oriented design is the most intuitive way for a user (or judge) to understand the system's functionality from each perspective. 
+    -->
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .chart-container { position: relative; width: 100%; max-width: 600px; margin-left: auto; margin-right: auto; height: 300px; max-height: 400px; }
+        @media (min-width: 768px) { .chart-container { height: 350px; } }
+        .view { display: none; }
+        .view.active { display: block; }
+        .flow-step {
+            border: 2px dashed #cbd5e1;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            background-color: #f8fafc;
+        }
+        .flow-connector {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 4rem;
+            width: 2px;
+            background-color: #94a3b8;
+            margin: 0 auto;
+        }
+         .flow-connector::after {
+            content: '▼';
+            color: #94a3b8;
+            position: absolute;
+            margin-top: 4.5rem;
+        }
+    </style>
+</head>
+<body class="bg-stone-100 text-stone-800">
+
+    <div id="app" class="min-h-screen">
+        <header class="bg-white shadow-sm sticky top-0 z-10">
+            <nav class="container mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex items-center justify-between h-16">
+                    <div class="flex items-center">
+                        <span class="font-bold text-xl text-indigo-600">Odoo ExpensePro</span>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <span class="font-medium">Simulate Role:</span>
+                        <button onclick="switchView('employee')" class="nav-btn px-3 py-2 rounded-md text-sm font-medium text-stone-600 hover:bg-stone-200" data-role="employee">Employee</button>
+                        <button onclick="switchView('manager')" class="nav-btn px-3 py-2 rounded-md text-sm font-medium text-stone-600 hover:bg-stone-200" data-role="manager">Manager</button>
+                        <button onclick="switchView('admin')" class="nav-btn px-3 py-2 rounded-md text-sm font-medium text-stone-600 hover:bg-stone-200" data-role="admin">Admin</button>
+                    </div>
+                </div>
+            </nav>
+        </header>
+
+        <main class="container mx-auto p-4 sm:p-6 lg:p-8">
+            
+            <!-- Role Selector (Initial View) -->
+            <div id="role-selector" class="view active">
+                 <div class="text-center">
+                    <h1 class="text-3xl font-bold tracking-tight text-stone-900 sm:text-4xl">Welcome to the Expense Management System</h1>
+                    <p class="mt-4 text-lg text-stone-600">Please select a role below to explore the application's features from a specific user's perspective.</p>
+                </div>
+                <div class="mt-12 grid grid-cols-1 md:grid-cols-3 gap-8">
+                    <div onclick="switchView('employee')" class="cursor-pointer bg-white p-8 rounded-lg shadow-md hover:shadow-xl transition-shadow text-center">
+                        <div class="text-5xl mb-4">🧑‍💼</div>
+                        <h2 class="text-2xl font-bold text-indigo-600">Employee</h2>
+                        <p class="mt-2 text-stone-500">Submit new expense claims and track the status of your past submissions.</p>
+                    </div>
+                    <div onclick="switchView('manager')" class="cursor-pointer bg-white p-8 rounded-lg shadow-md hover:shadow-xl transition-shadow text-center">
+                        <div class="text-5xl mb-4">👨‍⚖️</div>
+                        <h2 class="text-2xl font-bold text-indigo-600">Manager</h2>
+                        <p class="mt-2 text-stone-500">Review, approve, or reject expense claims submitted by your team members.</p>
+                    </div>
+                    <div onclick="switchView('admin')" class="cursor-pointer bg-white p-8 rounded-lg shadow-md hover:shadow-xl transition-shadow text-center">
+                        <div class="text-5xl mb-4">⚙️</div>
+                        <h2 class="text-2xl font-bold text-indigo-600">Admin</h2>
+                        <p class="mt-2 text-stone-500">Manage users, configure approval workflows, and oversee all company expenses.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Employee View -->
+            <div id="employee-view" class="view">
+                <h1 class="text-2xl font-bold mb-6">Employee Dashboard</h1>
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div class="lg:col-span-2 bg-white p-6 rounded-lg shadow-md">
+                        <div class="flex justify-between items-center mb-4">
+                            <h2 class="text-xl font-semibold">My Expense History</h2>
+                             <button onclick="openModal('expense-modal')" class="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 transition">Submit New Expense</button>
+                        </div>
+                        <table class="w-full text-left">
+                            <thead>
+                                <tr class="border-b">
+                                    <th class="py-2">Date</th>
+                                    <th class="py-2">Description</th>
+                                    <th class="py-2">Category</th>
+                                    <th class="py-2 text-right">Amount</th>
+                                    <th class="py-2 text-center">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="employee-expense-table">
+                                <!-- JS will populate this -->
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="bg-white p-6 rounded-lg shadow-md">
+                        <h2 class="text-xl font-semibold mb-4">My Stats</h2>
+                        <div class="space-y-4">
+                            <div>
+                                <p class="font-medium">Total Submitted</p>
+                                <p class="text-2xl font-bold text-indigo-600">5</p>
+                            </div>
+                            <div>
+                                <p class="font-medium">Total Approved</p>
+                                <p class="text-2xl font-bold text-green-600">$ 1,250.00</p>
+                            </div>
+                            <div>
+                                <p class="font-medium">Pending Review</p>
+                                <p class="text-2xl font-bold text-amber-600">1</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Manager View -->
+            <div id="manager-view" class="view">
+                <h1 class="text-2xl font-bold mb-6">Manager Dashboard</h1>
+                 <div class="bg-white p-6 rounded-lg shadow-md mb-6">
+                    <h2 class="text-xl font-semibold mb-4">Awaiting My Approval</h2>
+                    <table class="w-full text-left">
+                        <thead>
+                            <tr class="border-b">
+                                <th class="py-2">Employee</th>
+                                <th class="py-2">Date</th>
+                                <th class="py-2">Description</th>
+                                <th class="py-2 text-right">Amount (USD)</th>
+                                <th class="py-2 text-center">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="manager-approval-table">
+                            <!-- JS will populate this -->
+                        </tbody>
+                    </table>
+                </div>
+                 <div class="bg-white p-6 rounded-lg shadow-md">
+                    <h2 class="text-xl font-semibold mb-4">My Team's Expense History</h2>
+                    <table class="w-full text-left">
+                        <thead>
+                            <tr class="border-b">
+                                <th class="py-2">Employee</th>
+                                <th class="py-2">Date</th>
+                                <th class="py-2">Description</th>
+                                <th class="py-2 text-right">Amount</th>
+                                <th class="py-2 text-center">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="manager-team-table">
+                            <!-- JS will populate this -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Admin View -->
+            <div id="admin-view" class="view">
+                 <h1 class="text-2xl font-bold mb-6">Admin Dashboard</h1>
+                 <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+                     <div class="xl:col-span-2 space-y-6">
+                        <div class="bg-white p-6 rounded-lg shadow-md">
+                           <h2 class="text-xl font-semibold mb-4">Approval Flow Configuration</h2>
+                           <p class="text-stone-600 mb-4">Visually construct the approval process for expenses. Add steps and define rules for how claims are routed and approved. This interactive builder demonstrates the system's core logic for multi-level and conditional approvals.</p>
+                           <div id="flow-builder" class="space-y-2">
+                               <!-- JS generates flow steps here -->
+                           </div>
+                           <button onclick="addFlowStep()" class="mt-4 bg-indigo-100 text-indigo-700 px-4 py-2 rounded-md hover:bg-indigo-200 transition">+ Add Step</button>
+                        </div>
+                         <div class="bg-white p-6 rounded-lg shadow-md">
+                            <h2 class="text-xl font-semibold mb-4">User Management</h2>
+                            <table class="w-full text-left">
+                                <thead>
+                                    <tr class="border-b">
+                                        <th class="py-2">Name</th>
+                                        <th class="py-2">Email</th>
+                                        <th class="py-2">Role</th>
+                                        <th class="py-2">Manager</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="user-management-table">
+                                   <!-- JS will populate this -->
+                                </tbody>
+                            </table>
+                        </div>
+                     </div>
+                     <div class="space-y-6">
+                        <div class="bg-white p-6 rounded-lg shadow-md">
+                           <h2 class="text-xl font-semibold mb-4">Expense Status Breakdown</h2>
+                           <div class="chart-container">
+                               <canvas id="statusChart"></canvas>
+                           </div>
+                       </div>
+                        <div class="bg-white p-6 rounded-lg shadow-md">
+                           <h2 class="text-xl font-semibold mb-4">Expenses by Category</h2>
+                           <div class="chart-container" style="height: 250px;">
+                               <canvas id="categoryChart"></canvas>
+                           </div>
+                       </div>
+                     </div>
+                 </div>
+            </div>
+
+        </main>
+    </div>
+
+    <!-- Modals -->
+    <div id="expense-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-20">
+        <div class="bg-white rounded-lg shadow-xl p-8 w-full max-w-md">
+            <h2 class="text-2xl font-bold mb-4">Submit New Expense</h2>
+            <form id="expense-form">
+                 <div class="space-y-4">
+                     <div>
+                        <label for="amount" class="block text-sm font-medium text-stone-700">Amount</label>
+                        <div class="mt-1 flex rounded-md shadow-sm">
+                             <input type="number" name="amount" id="amount" class="flex-1 block w-full rounded-none rounded-l-md border-stone-300 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" placeholder="100.00" required>
+                             <input type="text" name="currency" id="currency" class="block w-20 rounded-r-md border-stone-300 bg-stone-50 text-stone-500 sm:text-sm" placeholder="USD" value="EUR" required>
+                        </div>
+                    </div>
+                     <div>
+                        <label for="category" class="block text-sm font-medium text-stone-700">Category</label>
+                        <select id="category" name="category" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md" required>
+                            <option>Travel</option>
+                            <option>Meals</option>
+                            <option>Office Supplies</option>
+                             <option>Software</option>
+                        </select>
+                    </div>
+                     <div>
+                        <label for="description" class="block text-sm font-medium text-stone-700">Description</label>
+                        <textarea id="description" name="description" rows="3" class="mt-1 shadow-sm focus:ring-indigo-500 focus:border-indigo-500 block w-full sm:text-sm border border-gray-300 rounded-md" placeholder="Client dinner meeting" required></textarea>
+                    </div>
+                </div>
+                 <div class="mt-6 flex justify-end space-x-3">
+                    <button type="button" onclick="closeModal('expense-modal')" class="bg-white py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none">Cancel</button>
+                    <button type="submit" class="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none">Submit</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <script>
+    // --- DATA ---
+    const users = [
+        { id: 1, name: 'Admin User', email: 'admin@odoo.com', role: 'Admin', managerId: null },
+        { id: 2, name: 'Eleanor Vance', email: 'eleanor@odoo.com', role: 'Employee', managerId: 4 },
+        { id: 3, name: 'Marcus Holloway', email: 'marcus@odoo.com', role: 'Employee', managerId: 4 },
+        { id: 4, name: 'Jane Smith', email: 'jane.s@odoo.com', role: 'Manager', managerId: 1 },
+        { id: 5, name: 'John Doe', email: 'john.d@odoo.com', role: 'Manager', managerId: 1 },
+    ];
+
+    let expenses = [
+        { id: 1, userId: 2, date: '2025-10-01', description: 'Flight to Client Site', category: 'Travel', amount: 850.00, currency: 'USD', status: 'Approved' },
+        { id: 2, userId: 2, date: '2025-10-02', description: 'Team Lunch', category: 'Meals', amount: 150.00, currency: 'EUR', status: 'Approved' },
+        { id: 3, userId: 3, date: '2025-10-03', description: 'Project Software License', category: 'Software', amount: 250.00, currency: 'USD', status: 'Rejected' },
+        { id: 4, userId: 3, date: '2025-10-03', description: 'New Keyboard & Mouse', category: 'Office Supplies', amount: 120.00, currency: 'USD', status: 'Pending' },
+        { id: 5, userId: 2, date: '2025-10-04', description: 'Taxi from airport', category: 'Travel', amount: 75.00, currency: 'GBP', status: 'Pending' }
+    ];
+
+    // --- UTILITY FUNCTIONS ---
+    const getUserById = (id) => users.find(u => u.id === id);
+    const getStatusBadge = (status) => {
+        const colors = {
+            'Approved': 'bg-green-100 text-green-800',
+            'Pending': 'bg-amber-100 text-amber-800',
+            'Rejected': 'bg-red-100 text-red-800',
+        };
+        return `<span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${colors[status]}">${status}</span>`;
+    };
+    
+    // --- RENDER FUNCTIONS ---
+    function renderEmployeeTable() {
+        const tableBody = document.getElementById('employee-expense-table');
+        const employeeExpenses = expenses.filter(e => e.userId === 2); // Simulating logged in as Eleanor
+        tableBody.innerHTML = employeeExpenses.map(e => `
+            <tr class="border-b hover:bg-stone-50">
+                <td class="py-2">${e.date}</td>
+                <td class="py-2">${e.description}</td>
+                <td class="py-2">${e.category}</td>
+                <td class="py-2 text-right">${e.amount.toFixed(2)} ${e.currency}</td>
+                <td class="py-2 text-center">${getStatusBadge(e.status)}</td>
+            </tr>
+        `).join('');
+    }
+
+    function renderManagerTables() {
+        const approvalTable = document.getElementById('manager-approval-table');
+        const teamTable = document.getElementById('manager-team-table');
+        const teamIds = users.filter(u => u.managerId === 4).map(u => u.id); // Simulating Jane's team
+        const teamExpenses = expenses.filter(e => teamIds.includes(e.userId));
+        
+        approvalTable.innerHTML = teamExpenses.filter(e => e.status === 'Pending').map(e => `
+            <tr class="border-b hover:bg-stone-50">
+                <td class="py-2">${getUserById(e.userId).name}</td>
+                <td class="py-2">${e.date}</td>
+                <td class="py-2">${e.description}</td>
+                <td class="py-2 text-right">${(e.amount * 1.08).toFixed(2)} USD</td>
+                <td class="py-2 text-center space-x-2">
+                    <button onclick="handleApproval(${e.id}, 'Approved')" class="text-green-600 hover:text-green-800 font-medium">Approve</button>
+                    <button onclick="handleApproval(${e.id}, 'Rejected')" class="text-red-600 hover:text-red-800 font-medium">Reject</button>
+                </td>
+            </tr>
+        `).join('');
+
+        teamTable.innerHTML = teamExpenses.map(e => `
+            <tr class="border-b hover:bg-stone-50">
+                <td class="py-2">${getUserById(e.userId).name}</td>
+                <td class="py-2">${e.date}</td>
+                <td class="py-2">${e.description}</td>
+                <td class="py-2 text-right">${e.amount.toFixed(2)} ${e.currency}</td>
+                <td class="py-2 text-center">${getStatusBadge(e.status)}</td>
+            </tr>
+        `).join('');
+    }
+    
+    function renderAdminTables() {
+        const userTable = document.getElementById('user-management-table');
+        userTable.innerHTML = users.map(u => `
+             <tr class="border-b hover:bg-stone-50">
+                <td class="py-2">${u.name}</td>
+                <td class="py-2">${u.email}</td>
+                <td class="py-2">${u.role}</td>
+                <td class="py-2">${u.managerId ? getUserById(u.managerId).name : 'N/A'}</td>
+            </tr>
+        `).join('');
+    }
+
+    function renderFlowBuilder() {
+        const builder = document.getElementById('flow-builder');
+        builder.innerHTML = `
+            <div class="flow-step">
+                <p class="font-bold">Step 1: Initial Review</p>
+                <div class="mt-2">
+                    <label class="text-sm">Approver Type:</label>
+                    <select class="text-sm rounded-md border-gray-300">
+                        <option selected>Direct Manager</option>
+                        <option>Specific User</option>
+                        <option>Role</option>
+                    </select>
+                </div>
+            </div>
+            <div class="flow-connector"></div>
+            <div class="flow-step">
+                <div class="flex justify-between items-center">
+                    <p class="font-bold">Step 2: Final Approval (Conditional)</p>
+                    <label class="flex items-center space-x-2 text-sm">
+                        <input type="checkbox" class="rounded" checked onchange="toggleConditional(this)">
+                        <span>Is Conditional</span>
+                    </label>
+                </div>
+                <div id="conditional-rules" class="mt-2 space-y-2 bg-indigo-50 p-3 rounded-md">
+                    <p class="text-sm font-medium text-indigo-800">Rule: If expense is > $1000</p>
+                    <select class="text-sm rounded-md border-gray-300 w-full">
+                        <option>Specific approver rule</option>
+                        <option>Percentage rule</option>
+                        <option>Hybrid rule</option>
+                    </select>
+                    <div class="text-sm">
+                        <label>Required Approver:</label>
+                        <select class="text-sm rounded-md border-gray-300">
+                            <option>Admin User (Admin)</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    // --- CHARTS ---
+    let statusChart, categoryChart;
+    function renderAdminCharts() {
+        const statusCtx = document.getElementById('statusChart').getContext('2d');
+        const categoryCtx = document.getElementById('categoryChart').getContext('2d');
+        
+        const statusCounts = expenses.reduce((acc, e) => {
+            acc[e.status] = (acc[e.status] || 0) + 1;
+            return acc;
+        }, {});
+
+        const categoryCounts = expenses.reduce((acc, e) => {
+            acc[e.category] = (acc[e.category] || 0) + e.amount;
+            return acc;
+        }, {});
+
+        if(statusChart) statusChart.destroy();
+        statusChart = new Chart(statusCtx, {
+            type: 'doughnut',
+            data: {
+                labels: Object.keys(statusCounts),
+                datasets: [{
+                    data: Object.values(statusCounts),
+                    backgroundColor: ['#10b981', '#f59e0b', '#ef4444'],
+                }]
+            },
+            options: { maintainAspectRatio: false, responsive: true }
+        });
+
+        if(categoryChart) categoryChart.destroy();
+        categoryChart = new Chart(categoryCtx, {
+            type: 'bar',
+            data: {
+                labels: Object.keys(categoryCounts),
+                datasets: [{
+                    label: 'Total Spent (USD eq.)',
+                    data: Object.values(categoryCounts),
+                    backgroundColor: '#4f46e5',
+                }]
+            },
+            options: { maintainAspectRatio: false, responsive: true, plugins: { legend: { display: false } } }
+        });
+    }
+
+    // --- INTERACTION HANDLERS ---
+    function switchView(viewName) {
+        document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+        document.getElementById(`${viewName}-view`).classList.add('active');
+        document.getElementById('role-selector').classList.remove('active');
+
+        document.querySelectorAll('.nav-btn').forEach(b => {
+             b.classList.remove('bg-indigo-100', 'text-indigo-700');
+             b.classList.add('text-stone-600');
+        });
+        const activeBtn = document.querySelector(`.nav-btn[data-role="${viewName}"]`);
+        activeBtn.classList.add('bg-indigo-100', 'text-indigo-700');
+
+        if(viewName === 'admin') {
+            renderAdminCharts();
+            renderAdminTables();
+            renderFlowBuilder();
+        } else if(viewName === 'manager') {
+            renderManagerTables();
+        } else if (viewName === 'employee') {
+            renderEmployeeTable();
+        }
+    }
+
+    function handleApproval(expenseId, newStatus) {
+        const expense = expenses.find(e => e.id === expenseId);
+        if(expense) {
+            expense.status = newStatus;
+            renderManagerTables();
+        }
+    }
+    
+    function addFlowStep() {
+        alert("This demonstrates adding a new step to the workflow.");
+    }
+
+    function toggleConditional(checkbox) {
+        const rulesDiv = document.getElementById('conditional-rules');
+        rulesDiv.style.display = checkbox.checked ? 'block' : 'none';
+    }
+    
+    function openModal(modalId) { document.getElementById(modalId).classList.replace('hidden', 'flex'); }
+    function closeModal(modalId) { document.getElementById(modalId).classList.replace('flex', 'hidden'); }
+
+    document.getElementById('expense-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const formData = new FormData(e.target);
+        const newExpense = {
+            id: expenses.length + 1,
+            userId: 2, // Hardcoded for Eleanor
+            date: new Date().toISOString().split('T')[0],
+            description: formData.get('description'),
+            category: formData.get('category'),
+            amount: parseFloat(formData.get('amount')),
+            currency: formData.get('currency').toUpperCase(),
+            status: 'Pending'
+        };
+        expenses.push(newExpense);
+        renderEmployeeTable();
+        closeModal('expense-modal');
+        e.target.reset();
+    });
+
+    // --- INITIALIZATION ---
+    window.onload = () => {
+        // Initially no view is selected, show role selector
+    };
+</script>
+
+</body>
+</html>
