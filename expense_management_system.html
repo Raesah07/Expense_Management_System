@@ -12,10 +12,10 @@
     <script src="https://unpkg.com/lucide@latest"></script>
     <!-- Load Firebase Modules -->
     <script type="module">
-        // Import necessary Firebase functions, including signOut for the new feature
+        // Import necessary Firebase functions, including signOut and deleteDoc for new features
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, doc, setDoc, addDoc, onSnapshot, getDoc, updateDoc, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, doc, setDoc, addDoc, onSnapshot, getDoc, updateDoc, setLogLevel, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // Global variables provided by the Canvas environment (with robust safety check)
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
@@ -61,12 +61,13 @@
                     
                     // Expose mock utilities to prevent errors, but they won't save data
                     window.collection = (db, path) => ({ db, path }); 
-                    window.addDoc = async () => { 
+                    window.addDoc = async (ref, data) => { 
                         window.showModal('Local Mode Alert', 'Cannot save expense. Application is running in local mode without Firebase configuration.');
                         return { id: 'mock-id' };
                     };
                     window.updateDoc = async () => console.log('Mock update called.');
-                    window.doc = () => {}; 
+                    window.deleteDoc = async () => console.log('Mock delete called.'); // Mock delete
+                    window.doc = (db, collectionPath, docId) => ({ db, collectionPath, docId }); 
                     window.EXPENSES_COLLECTION = 'mock-collection';
                     window.startExpenseListener = () => { window.calculateBaseAmounts(); }; 
                     
@@ -160,20 +161,21 @@
                     window.demoUsers[employeeId] = { name: 'Mock Employee', role: 'Employee', managerId: userId, uid: employeeId };
                     
                     // Add a pending expense for the manager to see immediately
-                    window.allExpenses.push({
+                    const mockPendingExpense = {
                         id: 'mock-pending-1',
                         userId: employeeId,
                         userName: 'Mock Employee',
                         date: new Date().toISOString().substring(0, 10),
-                        description: 'Mock expense awaiting approval',
+                        description: 'Mock expense awaiting approval: Lunch with client for new feature sign-off.',
                         category: 'Meals',
                         original_amount: 50.00,
                         original_currency: 'EUR',
-                        base_amount: 50.00,
+                        base_amount: 50.00 * window.EXCHANGE_RATES['EUR'],
                         status: 'Pending', 
                         approverId: userId, // Manager's ID
                         submitted_on: new Date().toISOString()
-                    });
+                    };
+                    window.allExpenses.push(mockPendingExpense);
                 }
 
                 // Expose global accessors for mock mode
@@ -282,6 +284,13 @@
             });
         };
 
+        // --- Currency Conversion (Static Mock Rates) ---
+        window.EXCHANGE_RATES = {
+            'USD': 1.00,
+            'EUR': 1.08, // Mock rate
+            'GBP': 1.25, // Mock rate
+            'INR': 0.012, // Mock rate
+        };
 
         // --- Global Setup Mappings ---
         window.companyBaseCurrency = 'USD';
@@ -373,6 +382,10 @@
         .role-text-employee { color: #008a00; }
         .role-text-manager { color: var(--odoo-blue); }
         .role-text-admin { color: #dc3545; }
+        .action-icon {
+            cursor: pointer;
+            transition: color 0.15s;
+        }
     </style>
 </head>
 <body>
@@ -446,8 +459,9 @@
                                         <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
                                         <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
                                         <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
-                                        <th class="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+                                        <th class="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Amount (USD)</th>
                                         <th class="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                                        <th class="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
                                     </tr>
                                 </thead>
                                 <tbody id="employee-expense-list" class="bg-white divide-y divide-gray-200">
@@ -508,7 +522,7 @@
 
                     <div id="manager" class="tab-pane hidden">
                         <h2 class="text-2xl font-semibold mb-4 text-odoo-green">Expenses Awaiting My Approval</h2>
-                        <p class="text-sm text-gray-600 mb-4">All amounts are displayed in the company's base currency: **USD**. (Note: Rates are currently fixed at 1:1 for reliable submission.)</p>
+                        <p class="text-sm text-gray-600 mb-4">All amounts are displayed in the company's base currency: **USD** (Rates are static mock values).</p>
                         <div class="bg-white p-4 md:p-6 rounded-xl shadow-md overflow-x-auto custom-scroll">
                             <table class="min-w-full divide-y divide-gray-200">
                                 <thead class="bg-gray-50">
@@ -517,7 +531,6 @@
                                         <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
                                         <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
                                         <th class="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Amount (USD)</th>
-                                        <th class="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Original Amount</th>
                                         <th class="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
                                     </tr>
                                 </thead>
@@ -557,12 +570,64 @@
             </div>
         </main>
         
-        <!-- Custom Modal for Notifications -->
+        <!-- Custom Modal for Notifications (Replaces alerts) -->
         <div id="custom-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden items-center justify-center p-4 z-50" onclick="this.classList.add('hidden')">
             <div class="bg-white rounded-xl p-6 shadow-2xl max-w-sm w-full" onclick="event.stopPropagation()">
                 <h3 id="modal-title" class="text-xl font-bold mb-3 text-odoo-green">Notification</h3>
                 <p id="modal-message" class="text-gray-700 mb-4"></p>
                 <button onclick="document.getElementById('custom-modal').classList.add('hidden')" class="btn-primary text-white font-semibold py-2 px-4 rounded-lg w-full">OK</button>
+            </div>
+        </div>
+
+        <!-- NEW: Expense Detail Modal for Manager Review -->
+        <div id="detail-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden items-center justify-center p-4 z-50" onclick="this.classList.add('hidden')">
+            <div class="bg-white rounded-xl p-8 shadow-2xl max-w-lg w-full" onclick="event.stopPropagation()">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-2xl font-bold text-odoo-green">Expense Claim Details</h3>
+                    <button onclick="document.getElementById('detail-modal').classList.add('hidden')" class="text-gray-500 hover:text-gray-700">
+                        <i data-lucide="x" class="w-6 h-6"></i>
+                    </button>
+                </div>
+                
+                <div class="space-y-3 text-gray-700">
+                    <div class="border-b pb-2">
+                        <p class="text-xs font-medium uppercase text-gray-500">Submitted By</p>
+                        <p id="detail-submitter" class="font-semibold text-lg"></p>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <p class="text-xs font-medium uppercase text-gray-500">Date</p>
+                            <p id="detail-date" class="font-medium"></p>
+                        </div>
+                        <div>
+                            <p class="text-xs font-medium uppercase text-gray-500">Category</p>
+                            <p id="detail-category" class="font-medium"></p>
+                        </div>
+                    </div>
+                    <div class="pt-2">
+                        <p class="text-xs font-medium uppercase text-gray-500">Description</p>
+                        <p id="detail-description" class="p-3 bg-gray-50 rounded-lg border text-sm"></p>
+                    </div>
+                    <div class="grid grid-cols-3 gap-4 border-t pt-3">
+                        <div>
+                            <p class="text-xs font-medium uppercase text-gray-500">Original Amount</p>
+                            <p id="detail-original" class="font-bold"></p>
+                        </div>
+                        <div>
+                            <p class="text-xs font-medium uppercase text-gray-500">Exchange Rate</p>
+                            <p id="detail-rate" class="font-bold text-sm"></p>
+                        </div>
+                        <div>
+                            <p class="text-xs font-medium uppercase text-gray-500">Base Amount (USD)</p>
+                            <p id="detail-base-amount" class="font-extrabold text-xl text-odoo-green"></p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="flex justify-end space-x-3 mt-6">
+                    <button id="detail-reject-btn" class="bg-red-500 hover:bg-red-600 text-white font-semibold py-2 px-4 rounded-lg text-sm">Reject</button>
+                    <button id="detail-approve-btn" class="bg-green-500 hover:bg-green-600 text-white font-semibold py-2 px-4 rounded-lg text-sm">Approve</button>
+                </div>
             </div>
         </div>
 
@@ -582,6 +647,42 @@
             document.getElementById('custom-modal').classList.remove('hidden');
             document.getElementById('custom-modal').classList.add('flex');
         };
+        
+        // --- NEW: Expense Details Modal Functionality ---
+        window.showExpenseDetails = (expenseId) => {
+            const expense = window.allExpenses.find(e => e.id === expenseId);
+            if (!expense) {
+                window.showModal('Error', 'Expense details not found.');
+                return;
+            }
+
+            const submitterProfile = window.demoUsers[expense.userId];
+            const userName = submitterProfile?.name || expense.userName || 'Unknown User';
+            const rate = window.EXCHANGE_RATES[expense.original_currency] || 1.0;
+
+            document.getElementById('detail-submitter').textContent = `${userName} (ID: ${expense.userId.substring(0, 8)}...)`;
+            document.getElementById('detail-date').textContent = expense.date;
+            document.getElementById('detail-category').textContent = expense.category;
+            document.getElementById('detail-description').textContent = expense.description;
+            document.getElementById('detail-original').textContent = `${expense.original_amount.toFixed(2)} ${expense.original_currency}`;
+            document.getElementById('detail-rate').textContent = `1 ${expense.original_currency} = ${rate.toFixed(3)} USD`;
+            document.getElementById('detail-base-amount').textContent = `$${expense.base_amount.toFixed(2)}`;
+
+            // Attach event listeners to the modal action buttons
+            document.getElementById('detail-approve-btn').onclick = (e) => {
+                document.getElementById('detail-modal').classList.add('hidden');
+                window.handleApproval(expenseId, 'Approved', e);
+            };
+            document.getElementById('detail-reject-btn').onclick = (e) => {
+                document.getElementById('detail-modal').classList.add('hidden');
+                window.handleApproval(expenseId, 'Rejected', e);
+            };
+
+            document.getElementById('detail-modal').classList.remove('hidden');
+            document.getElementById('detail-modal').classList.add('flex');
+            lucide.createIcons();
+        };
+
 
         // Function to update the UI based on the current user's profile
         const updateUI = () => {
@@ -658,17 +759,17 @@
             }
         };
 
-        // --- Currency Conversion (MOCKED FOR STABILITY) ---
+        // --- Currency Conversion Implementation ---
 
         /**
-         * Calculates and sets the base_amount for all expenses using a fixed rate (1.0).
+         * Calculates and sets the base_amount for all expenses using static mock rates.
          */
         window.calculateBaseAmounts = () => {
-            // Update all expenses with calculated base_amount (fixed at 1:1 conversion for stability)
+            // Update all expenses with calculated base_amount
             window.allExpenses = (window.allExpenses || []).map(expense => {
-                // Ensure number types are used for calculations
                 const original_amount = parseFloat(expense.original_amount); 
-                expense.base_amount = original_amount; 
+                const rate = window.EXCHANGE_RATES[expense.original_currency] || 1.00;
+                expense.base_amount = original_amount * rate; 
                 return expense;
             });
 
@@ -681,35 +782,53 @@
             const listEl = document.getElementById('employee-expense-list');
             listEl.innerHTML = '';
             
-            // We use the authenticated/mock user's ID
             const targetUserId = currentUserId;
 
             const userExpenses = window.allExpenses.filter(e => e.userId === targetUserId)
                 .sort((a, b) => new Date(b.date) - new Date(a.date));
 
             if (userExpenses.length === 0) {
-                listEl.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-gray-500">No expenses submitted yet.</td></tr>`;
+                listEl.innerHTML = `<tr><td colspan="6" class="text-center py-4 text-gray-500">No expenses submitted yet.</td></tr>`;
                 return;
             }
 
             userExpenses.forEach(expense => {
+                const isDeletable = expense.status === 'Draft' || expense.status === 'Pending';
+                
+                // Truncate description for table display
+                const displayDescription = expense.description.length > 50 ? 
+                    expense.description.substring(0, 47) + '...' : expense.description;
+                    
                 const row = `
                     <tr class="hover:bg-gray-50">
                         <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-700">${expense.date}</td>
-                        <td class="px-3 py-3 whitespace-nowrap text-sm font-medium text-gray-800">${expense.description}</td>
+                        <td class="px-3 py-3 whitespace-nowrap text-sm font-medium text-gray-800">${displayDescription}</td>
                         <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-500">${expense.category}</td>
-                        <td class="px-3 py-3 whitespace-nowrap text-sm text-right font-semibold">
-                            ${expense.original_amount.toFixed(2)} ${expense.original_currency}
+                        <td class="px-3 py-3 whitespace-nowrap text-sm text-right font-semibold text-odoo-green">
+                            $${expense.base_amount.toFixed(2)} <span class="text-gray-500 font-normal text-xs">(${expense.original_currency})</span>
                         </td>
                         <td class="px-3 py-3 whitespace-nowrap text-center">
                             <span class="status-pill status-${expense.status}">
                                 ${expense.status}
                             </span>
                         </td>
+                        <td class="px-3 py-3 whitespace-nowrap text-center">
+                            ${isDeletable ? `
+                                <button onclick="window.deleteExpense('${expense.id}')" title="Delete Expense"
+                                    class="text-red-500 hover:text-red-700 transition duration-150 p-1 rounded-full hover:bg-red-100">
+                                    <i data-lucide="trash-2" class="w-4 h-4"></i>
+                                </button>
+                            ` : `
+                                <span class="text-gray-400 p-1" title="Cannot delete approved/rejected expense">
+                                    <i data-lucide="lock" class="w-4 h-4"></i>
+                                </span>
+                            `}
+                        </td>
                     </tr>
                 `;
                 listEl.innerHTML += row;
             });
+            lucide.createIcons();
         };
 
         const renderManagerApprovals = () => {
@@ -723,34 +842,30 @@
             ).sort((a, b) => new Date(a.date) - new Date(b.date));
 
             if (expensesForApproval.length === 0) {
-                listEl.innerHTML = `<tr><td colspan="6" class="text-center py-4 text-gray-500">No expenses awaiting your approval.</td></tr>`;
+                listEl.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-gray-500">No expenses awaiting your approval.</td></tr>`;
                 return;
             }
 
             expensesForApproval.forEach(expense => {
-                // Look up the submitter's name
                 const submitterProfile = window.demoUsers[expense.userId];
                 const userName = submitterProfile?.name || expense.userName || 'Unknown User';
+                
+                // Truncate description for table display
+                const displayDescription = expense.description.length > 50 ? 
+                    expense.description.substring(0, 47) + '...' : expense.description;
                 
                 const row = `
                     <tr class="hover:bg-gray-50">
                         <td class="px-3 py-3 whitespace-nowrap text-sm font-medium text-gray-800">${userName}</td>
                         <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-700">${expense.date}</td>
-                        <td class="px-3 py-3 whitespace-normal max-w-xs text-sm text-gray-500">${expense.description}</td>
+                        <td class="px-3 py-3 whitespace-normal max-w-xs text-sm text-gray-500">${displayDescription}</td>
                         <td class="px-3 py-3 whitespace-nowrap text-sm font-semibold text-right text-odoo-green">
                             $${expense.base_amount.toFixed(2)}
                         </td>
-                        <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-500 text-right">
-                            (${expense.original_amount.toFixed(2)} ${expense.original_currency})
-                        </td>
                         <td class="px-3 py-3 whitespace-nowrap text-center space-x-2">
-                            <button onclick="window.handleApproval('${expense.id}', 'Approved', event)" 
-                                class="bg-green-500 hover:bg-green-600 text-white p-2 rounded-lg text-xs font-semibold shadow-sm approval-btn" data-id="${expense.id}">
-                                Approve
-                            </button>
-                            <button onclick="window.handleApproval('${expense.id}', 'Rejected', event)" 
-                                class="bg-red-500 hover:bg-red-600 text-white p-2 rounded-lg text-xs font-semibold shadow-sm approval-btn" data-id="${expense.id}">
-                                Reject
+                            <button onclick="window.showExpenseDetails('${expense.id}')" 
+                                class="bg-gray-200 hover:bg-gray-300 text-gray-700 p-2 rounded-lg text-xs font-semibold shadow-sm">
+                                View Details
                             </button>
                         </td>
                     </tr>
@@ -770,7 +885,6 @@
         window.submitExpense = async (event) => {
             event.preventDefault();
 
-            // Check if we are ready
             if (!window.isAuthReady()) {
                 window.showModal('Initialization Error', 'Application is still connecting to the database. Please wait a moment and try again.');
                 return;
@@ -788,27 +902,21 @@
             const original_amount = parseFloat(document.getElementById('exp-amount').value);
             
             try {
-                // MOCK: Base amount is set to original amount (1:1 conversion) to avoid API dependency
-                const base_amount = original_amount; 
+                // Calculate base amount using static mock rates
+                const rate = window.EXCHANGE_RATES[original_currency] || 1.00;
+                const base_amount = original_amount * rate; 
 
                 // Determine the submitting user's information
                 let submitUserId = currentUserId;
                 let submitUserName = userProfile.name;
-                
-                // Get the manager ID from the user profile
                 let approverId = userProfile.managerId; 
                 
-                if (!approverId) {
-                     // Fallback for Admins or Managers who might not have an assigned manager
-                     approverId = currentUserId; 
-                }
-
+                if (!approverId) { approverId = currentUserId; }
+                
                 if (!window.db && userProfile.role === 'Employee') {
-                    // In mock mode, an Employee submits to the default mock manager
                     approverId = window.demoUsers[userProfile.managerId]?.uid || 'mock-manager-default'; 
                 }
                 
-                // Construct the new expense object
                 const newExpenseData = {
                     userId: submitUserId,
                     userName: submitUserName,
@@ -824,19 +932,16 @@
                 };
 
                 if (window.db) {
-                    // Real-time submission
                     const expensesCollectionRef = window.collection(window.db, window.EXPENSES_COLLECTION);
                     await window.addDoc(expensesCollectionRef, newExpenseData);
                     window.showModal('Success!', `Expense claim submitted successfully for approval. Value: $${base_amount.toFixed(2)} USD.`);
                 } else {
-                    // Local Mock Mode: Add to the local array
                     const newMockExpense = { ...newExpenseData, id: 'mock-' + (window.allExpenses.length + 1) };
                     window.allExpenses.push(newMockExpense);
-                    renderContent(); // Rerender to show the new expense
-                    window.showModal('Success (Local Mode)!', `Expense claim submitted to local history. It was NOT saved to the database.`);
+                    renderContent(); 
+                    window.showModal('Success (Local Mode)!', `Expense claim submitted to local history. Base Amount: $${base_amount.toFixed(2)} USD`);
                 }
                 
-                // Update UI and provide feedback
                 document.getElementById('expense-form').reset();
             } catch (e) {
                 console.error("Error submitting expense:", e);
@@ -857,19 +962,10 @@
                 return;
             }
             
-            const approvalBtn = event.target;
-            const originalText = approvalBtn.textContent;
-
-            // Find all buttons for this expense and disable them
-            document.querySelectorAll(`.approval-btn[data-id="${expenseId}"]`).forEach(btn => {
-                btn.disabled = true;
-                btn.textContent = '...';
-            });
+            // Note: We don't disable buttons here as they are inside a modal that closes, or the table row will be refreshed by onSnapshot.
             
             try {
                 if (window.db) {
-                    // --- REAL-TIME UPDATE LOGIC (Firestore) ---
-                    
                     const expenseDocRef = window.doc(window.db, window.EXPENSES_COLLECTION, expenseId);
                     
                     await window.updateDoc(expenseDocRef, {
@@ -879,19 +975,12 @@
                     });
                     
                     window.showModal(`Expense ${newStatus}`, `Claim #${expenseId.substring(0, 8)}... has been ${newStatus}.`);
-                    
-                    // The onSnapshot listener will automatically handle the UI refresh (removing the row)
 
                 } else {
-                    // --- LOCAL MOCK MODE UPDATE LOGIC ---
-                    
                     const expenseIndex = window.allExpenses.findIndex(e => e.id === expenseId);
                     if (expenseIndex !== -1) {
-                        // Update the local object properties
                         window.allExpenses[expenseIndex].status = newStatus;
                         window.allExpenses[expenseIndex].approvedBy = currentUserId;
-                        
-                        // Manually trigger the re-render for local mode
                         renderContent(); 
                         window.showModal(`Action Successful (Local Mode)`, `Claim updated to ${newStatus} locally.`);
                     }
@@ -900,12 +989,47 @@
             } catch (e) {
                 console.error(`Error ${newStatus}ing expense:`, e);
                 window.showModal('Action Failed', `Failed to update expense status: ${e.message}`);
-            } finally {
-                 // Re-enable buttons only if an error occurred before the refresh could happen
-                 document.querySelectorAll(`.approval-btn[data-id="${expenseId}"]`).forEach(btn => {
-                     btn.disabled = false;
-                     btn.textContent = originalText;
-                 });
+            } 
+        };
+        
+        /**
+         * NEW: Handles the deletion of an expense claim.
+         */
+        window.deleteExpense = async (expenseId) => {
+            if (!window.isAuthReady()) {
+                window.showModal('Initialization Error', 'Application is still connecting to the database. Please wait a moment and try again.');
+                return;
+            }
+            
+            // Find the expense to check its status (should be PENDING or DRAFT, but check anyway)
+            const expense = window.allExpenses.find(e => e.id === expenseId);
+            if (!expense || (expense.status !== 'Draft' && expense.status !== 'Pending')) {
+                 window.showModal('Deletion Blocked', 'Only expenses with Draft or Pending status can be deleted.');
+                 return;
+            }
+            
+            if (window.db) {
+                // --- REAL-TIME DELETE LOGIC (Firestore) ---
+                try {
+                    const expenseDocRef = window.doc(window.db, window.EXPENSES_COLLECTION, expenseId);
+                    await window.deleteDoc(expenseDocRef);
+                    window.showModal('Success!', `Expense claim #${expenseId.substring(0, 8)}... has been permanently deleted.`);
+                    // UI refresh is handled by onSnapshot
+                } catch (e) {
+                    console.error("Error deleting expense:", e);
+                    window.showModal('Deletion Failed', `Failed to delete expense: ${e.message}`);
+                }
+            } else {
+                // --- LOCAL MOCK MODE DELETE LOGIC ---
+                const initialLength = window.allExpenses.length;
+                window.allExpenses = window.allExpenses.filter(e => e.id !== expenseId);
+                
+                if (window.allExpenses.length < initialLength) {
+                    renderContent();
+                    window.showModal('Success (Local Mode)!', `Expense deleted from local history.`);
+                } else {
+                    window.showModal('Deletion Failed (Local Mode)', `Expense not found in local history.`);
+                }
             }
         };
 
