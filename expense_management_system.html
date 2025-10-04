@@ -16,6 +16,8 @@
         .view.active { display: block; }
         .modal { background-color: rgba(0, 0, 0, 0.5); }
         .nav-btn { transition: all 0.2s; }
+        /* Style for disabled buttons while loading */
+        .loading-disabled { opacity: 0.6; pointer-events: none; }
     </style>
 </head>
 <body class="bg-stone-100 text-stone-800">
@@ -27,9 +29,9 @@
             
             <div class="flex items-center space-x-4">
                 <!-- User Info Display -->
-                <span id="user-info" class="text-sm font-semibold">Loading...</span>
+                <span id="user-info" class="text-sm font-semibold">Initializing Application...</span>
                 <!-- Only allow role change if data is ready -->
-                <button id="role-change-btn" onclick="openModal('role-modal')" class="bg-white text-green-700 px-3 py-1 rounded-full font-semibold shadow-md hover:bg-green-100 transition duration-150" disabled>
+                <button id="role-change-btn" onclick="openModal('role-modal')" class="bg-white text-green-700 px-3 py-1 rounded-full font-semibold shadow-md hover:bg-green-100 transition duration-150 loading-disabled">
                     Change Role
                 </button>
             </div>
@@ -37,25 +39,25 @@
 
         <!-- Main Navigation -->
         <nav id="main-nav" class="bg-white shadow-md p-4 flex space-x-4 sticky top-0 z-10">
-            <button data-role="employee" onclick="switchView('employee')" class="nav-btn px-4 py-2 rounded-lg text-stone-600 font-medium flex items-center" disabled>
+            <button id="nav-employee" data-role="employee" onclick="switchView('employee')" class="nav-btn px-4 py-2 rounded-lg text-stone-600 font-medium flex items-center loading-disabled">
                 <i data-lucide="user" class="w-5 h-5 mr-2"></i> Employee Dashboard
             </button>
-            <button data-role="manager" onclick="switchView('manager')" class="nav-btn px-4 py-2 rounded-lg text-stone-600 font-medium flex items-center" disabled>
+            <button id="nav-manager" data-role="manager" onclick="switchView('manager')" class="nav-btn px-4 py-2 rounded-lg text-stone-600 font-medium flex items-center loading-disabled">
                 <i data-lucide="briefcase" class="w-5 h-5 mr-2"></i> Manager Approvals
             </button>
-            <button data-role="admin" onclick="switchView('admin')" class="nav-btn px-4 py-2 rounded-lg text-stone-600 font-medium flex items-center" disabled>
+            <button id="nav-admin" data-role="admin" onclick="switchView('admin')" class="nav-btn px-4 py-2 rounded-lg text-stone-600 font-medium flex items-center loading-disabled">
                 <i data-lucide="bar-chart-3" class="w-5 h-5 mr-2"></i> Admin Reports & Setup
             </button>
         </nav>
 
-        <!-- Main Content Area (Layout unchanged from previous version) -->
+        <!-- Main Content Area -->
         <main class="p-6">
             
             <!-- Employee View -->
             <div id="employee-view" class="view">
                 <div class="flex justify-between items-center mb-6 border-b pb-4">
                     <h2 class="text-3xl font-semibold text-green-700">My Expense History</h2>
-                    <button onclick="openModal('expense-modal')" class="bg-indigo-600 text-white px-6 py-2 rounded-xl font-semibold shadow-lg hover:bg-indigo-700 transition duration-150 flex items-center">
+                    <button id="new-claim-btn" onclick="openModal('expense-modal')" class="bg-indigo-600 text-white px-6 py-2 rounded-xl font-semibold shadow-lg hover:bg-indigo-700 transition duration-150 flex items-center loading-disabled">
                         <i data-lucide="plus-circle" class="w-5 h-5 mr-2"></i> New Claim
                     </button>
                 </div>
@@ -71,7 +73,7 @@
                             </tr>
                         </thead>
                         <tbody id="employee-expense-table">
-                            <tr><td colspan="5" class="text-center py-4 text-stone-500">No expenses found or loading data...</td></tr>
+                            <tr><td colspan="5" class="text-center py-4 text-stone-500">Loading expenses...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -98,7 +100,7 @@
                                 </tr>
                             </thead>
                             <tbody id="manager-approval-table">
-                                <tr><td colspan="5" class="text-center py-4 text-stone-500">No pending approvals or loading data...</td></tr>
+                                <tr><td colspan="5" class="text-center py-4 text-stone-500">Loading approvals...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -121,7 +123,7 @@
                                 </tr>
                             </thead>
                             <tbody id="manager-team-table">
-                                <tr><td colspan="5" class="text-center py-4 text-stone-500">No team history or loading data...</td></tr>
+                                <tr><td colspan="5" class="text-center py-4 text-stone-500">Loading team history...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -242,10 +244,10 @@
     <div id="role-modal" class="modal fixed inset-0 hidden items-center justify-center z-50 transition duration-300">
         <div class="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-md">
             <h3 class="text-2xl font-bold mb-6 text-indigo-700 border-b pb-2">Select User Role</h3>
-            <div class="space-y-4">
+            <div class="space-y-4" id="role-selector-container">
                 <!-- Buttons dynamically generated -->
             </div>
-            <p class="text-xs text-stone-500 mt-4">Note: Your current Firebase ID is used to map to a role.</p>
+            <p class="text-xs text-stone-500 mt-4">Note: Your current Firebase ID is used to map to a role. Use this to switch views.</p>
         </div>
     </div>
     
@@ -266,143 +268,214 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, collection, onSnapshot, query, setDoc, addDoc, updateDoc, deleteDoc, where, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, collection, onSnapshot, query, setDoc, addDoc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         
         // Set Firestore log level for debugging
         setLogLevel('Debug');
 
-        // Global state for Firebase and App data
+        // --- GLOBAL STATE ---
         window.app = null;
         window.db = null;
         window.auth = null;
         window.currentUid = null;
-        window.appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        window.firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-
-        // Global App Data (Real-time updates will populate these)
+        window.isAuthReady = false;
+        window.isDataReady = false; 
+        
         window.allExpenses = [];
-        window.allUserRoles = []; // Array of { id, name, role, managerId } objects
+        window.allUserRoles = []; 
         window.currentRoleUser = null; 
         
-        // Mock data for initial user setup/demo (users whose IDs map to the roles)
+        // --- CONFIGURATION SETUP (WITH LOCAL/DEV FALLBACK) ---
+        
+        // 1. Check for Canvas injected variables
+        window.appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        
+        const firebaseConfigString = typeof __firebase_config !== 'undefined' ? __firebase_config : '{}';
+        window.firebaseConfig = {};
+        
+        // 2. Local Fallback Configuration (for running via file:// or simple local server)
+        const MOCK_FIREBASE_CONFIG = {
+            // A simple placeholder config that allows anonymous sign-in
+            apiKey: "MOCK_API_KEY", 
+            authDomain: "mock-project.firebaseapp.com",
+            projectId: "mock-project-id", // Must have a project ID to init
+            storageBucket: "mock-project.appspot.com",
+            messagingSenderId: "123456789012",
+            appId: "1:123456789012:web:abcdef01234567890"
+        };
+        
+        // Attempt to parse injected config, fall back to mock if empty or failed
+        let isMockConfig = false;
+        try {
+            window.firebaseConfig = JSON.parse(firebaseConfigString);
+            if (!window.firebaseConfig.projectId) {
+                 throw new Error("Injected config lacks project ID. Falling back.");
+            }
+        } catch (e) {
+            console.warn("Using MOCK Firebase Configuration. Real-time data will not be persistent across sessions if running outside Canvas.");
+            window.firebaseConfig = MOCK_FIREBASE_CONFIG;
+            isMockConfig = true;
+        }
+
+        // Mock data for initial user setup/demo (roles are identified by unique integer IDs)
         const MOCK_USER_ROLES = [
-            { id: 1, name: 'Admin User', role: 'admin', managerId: null },
-            { id: 2, name: 'Eleanor Vance', role: 'employee', managerId: 4 }, 
-            { id: 3, name: 'Marcus Holloway', role: 'employee', managerId: 4 }, 
-            { id: 4, name: 'Jane Smith', role: 'manager', managerId: 1 },     
+            { id: 1, name: 'Admin User (ID: 1)', role: 'admin', managerId: null },
+            { id: 2, name: 'Eleanor Vance (ID: 2)', role: 'employee', managerId: 4 }, 
+            { id: 3, name: 'Marcus Holloway (ID: 3)', role: 'employee', managerId: 4 }, 
+            { id: 4, name: 'Jane Smith (ID: 4)', role: 'manager', managerId: 1 },     
         ];
         
         // Mock exchange rates
         const USD_RATE_MOCK = { 'USD': 1.00, 'EUR': 1.08, 'GBP': 1.25 };
         window.USD_RATE_MOCK = USD_RATE_MOCK;
 
+        const roleCollectionPath = `artifacts/${window.appId}/public/data/user_roles`;
+        const expenseCollectionPath = `artifacts/${window.appId}/public/data/expenses`;
+
         // --- FIREBASE INITIALIZATION AND AUTHENTICATION ---
         async function initializeFirebase() {
             try {
                 if (window.app) return; 
 
-                window.app = initializeApp(firebaseConfig);
+                // 1. Initialize App
+                window.app = initializeApp(window.firebaseConfig);
                 window.db = getFirestore(window.app);
                 window.auth = getAuth(window.app);
+                updateUserInfoDisplay('Connecting to Firebase...');
 
-                const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-
-                if (initialAuthToken) {
+                // 2. Authenticate
+                if (initialAuthToken && !isMockConfig) {
                     await signInWithCustomToken(window.auth, initialAuthToken);
+                    console.log("Authenticated using custom token.");
                 } else {
                     await signInAnonymously(window.auth);
+                    console.log("Authenticated anonymously (MOCK or local run).");
                 }
 
+                // 3. Wait for Auth State Change
                 onAuthStateChanged(window.auth, async (user) => {
                     if (user) {
                         window.currentUid = user.uid;
-                        // Start listeners after authentication is complete
+                        window.isAuthReady = true;
+                        updateUserInfoDisplay('Auth Successful. Fetching Data...');
+                        
+                        // 4. Start data listeners and finalize app startup
                         setupListeners();
-                        console.log("Firebase initialized and listening to data.");
+                        console.log("Auth State Changed: User is logged in.");
                     } else {
-                        console.error("Authentication failed. Cannot access data.");
-                        window.showStatusMessage('Error', 'Authentication Failed. Please refresh.', 'red');
+                        console.error("Authentication failed or user logged out.");
+                        window.showStatusMessage('Error', 'Authentication Failed. Please check console.', 'red');
                     }
                 });
 
             } catch (error) {
                 console.error("Firebase Initialization Error:", error);
-                window.showStatusMessage('Error', 'Firebase initialization failed. Check console.', 'red');
+                window.showStatusMessage('Critical Error', `Initialization failed: ${error.message}. Check console for details.`, 'red');
             }
         }
 
         // --- FIREBASE LISTENERS ---
         function setupListeners() {
-            const expenseCollectionPath = `artifacts/${window.appId}/public/data/expenses`;
-            const roleCollectionPath = `artifacts/${window.appId}/public/data/user_roles`;
+            let rolesFetched = false;
+            let expensesFetched = false;
+
+            const checkReady = () => {
+                if (rolesFetched && expensesFetched && !window.isDataReady) {
+                    window.isDataReady = true;
+                    console.log("App Ready: Both roles and expenses fetched.");
+                    
+                    // Set default user role on first load (Eleanor Vance/ID 2)
+                    if (!window.currentRoleUser && window.allUserRoles.length > 0) {
+                        const defaultRole = window.allUserRoles.find(r => r.id === 2) || window.allUserRoles[0];
+                        window.currentRoleUser = defaultRole;
+                        window.switchView(defaultRole.role);
+                    }
+                    
+                    // Remove loading state from UI elements
+                    document.querySelectorAll('.loading-disabled').forEach(el => el.classList.remove('loading-disabled'));
+                }
+            };
             
             // 1. Listen for User Roles
             onSnapshot(collection(window.db, roleCollectionPath), async (snapshot) => {
-                const fetchedRoles = snapshot.docs.map(doc => ({ ...doc.data(), id: parseInt(doc.id, 10) }));
+                updateUserInfoDisplay('Fetching User Roles...');
+                const fetchedRoles = snapshot.docs.map(doc => ({ 
+                    ...doc.data(), 
+                    id: parseInt(doc.id, 10) || doc.id 
+                })).filter(r => r.role); 
+                
                 window.allUserRoles = fetchedRoles;
                 
-                // If roles are empty, seed the mock data
-                if (fetchedRoles.length === 0) {
+                // If roles are empty on first snapshot, seed the mock data
+                if (!rolesFetched && fetchedRoles.length < MOCK_USER_ROLES.length) {
+                    console.warn("Roles collection empty or incomplete. Seeding mock user roles.");
                     await seedUserRoles();
-                    return; // Wait for the seeded data to come back via snapshot
+                    return; 
                 }
 
-                // If a user role hasn't been set yet (first load)
-                if (!window.currentRoleUser) {
-                    // Default to the first Employee role for the demo
-                    const defaultRole = fetchedRoles.find(r => r.role === 'employee');
-                    if(defaultRole) {
-                        window.currentRoleUser = defaultRole;
-                        window.switchView(defaultRole.role);
-                    } else {
-                        console.error("No default role (employee) found in database.");
-                    }
-                }
-                
-                // Render the role selector buttons based on database roles
+                rolesFetched = true;
                 window.renderRoleSelector();
-                document.getElementById('role-change-btn').disabled = false;
+                checkReady();
+                console.log(`Roles Listener: ${fetchedRoles.length} roles loaded.`);
+            }, (error) => {
+                 console.error("Firestore Roles Listener Error:", error);
+                 rolesFetched = true;
+                 checkReady();
             });
             
             // 2. Listen for Expenses
             onSnapshot(collection(window.db, expenseCollectionPath), (snapshot) => {
+                updateUserInfoDisplay('Fetching Expense Data...');
                 window.allExpenses = snapshot.docs.map(doc => ({ 
                     ...doc.data(), 
                     docId: doc.id,
-                    amount: parseFloat(doc.data().amount) // Ensure amount is number
-                })).sort((a, b) => new Date(b.date) - new Date(a.date)); // Sort by date desc
+                    amount: parseFloat(doc.data().amount) || 0,
+                    userId: parseInt(doc.data().userId, 10) || doc.data().userId 
+                })).sort((a, b) => new Date(b.date) - new Date(a.date));
 
+                expensesFetched = true;
+                
                 // Re-render the current active view with the new data
-                if (window.currentRoleUser) {
+                if (window.currentRoleUser && window.isDataReady) {
                      window.switchView(window.currentRoleUser.role);
                 }
+                checkReady();
+                console.log(`Expenses Listener: ${window.allExpenses.length} expenses loaded.`);
+            }, (error) => {
+                 console.error("Firestore Expenses Listener Error:", error);
+                 expensesFetched = true;
+                 checkReady();
             });
         }
         
         // --- SEEDING MOCK DATA FOR DEMO ---
         async function seedUserRoles() {
-            const roleCollectionRef = collection(window.db, `artifacts/${window.appId}/public/data/user_roles`);
-            console.log("Seeding user roles...");
-            for (const user of MOCK_USER_ROLES) {
-                // Use setDoc with the ID as the document ID for cleaner integer mapping
-                await setDoc(doc(roleCollectionRef, user.id.toString()), {
-                    name: user.name,
-                    role: user.role,
-                    managerId: user.managerId,
-                });
+            const roleCollectionRef = collection(window.db, roleCollectionPath);
+            try {
+                for (const user of MOCK_USER_ROLES) {
+                    // Using setDoc with ID as the document ID
+                    await setDoc(window.doc(roleCollectionRef, user.id.toString()), {
+                        name: user.name,
+                        role: user.role,
+                        managerId: user.managerId,
+                    });
+                }
+                console.log("User roles seeded successfully.");
+            } catch (e) {
+                console.error("Seeding failed:", e);
+                window.showStatusMessage('Seeding Error', 'Failed to seed demo roles. Data tables may be empty.', 'red');
             }
-            console.log("User roles seeded successfully.");
         }
 
-        // --- EXPOSE FUNCTIONS GLOBALLY ---
-        window.initializeFirebase = initializeFirebase;
+        // --- EXPOSE FIREBASE FUNCTIONS GLOBALLY ---
         window.doc = doc;
         window.collection = collection;
         window.addDoc = addDoc;
         window.updateDoc = updateDoc;
         window.deleteDoc = deleteDoc;
-
+        window.initializeFirebase = initializeFirebase;
     </script>
 
     <script type="module">
@@ -410,7 +483,7 @@
         lucide.createIcons();
 
         // --- UTILITY FUNCTIONS ---
-        const getUserById = (id) => window.allUserRoles.find(u => u.id === id) || { name: 'Unknown User', role: 'N/A' };
+        const getUserById = (id) => window.allUserRoles.find(u => u.id === id) || { name: `User ID: ${id}`, role: 'N/A' };
         window.getUserById = getUserById;
         
         const getStatusBadge = (status) => {
@@ -448,17 +521,24 @@
 
 
         // --- UI RENDER FUNCTIONS ---
-        function updateUserInfoDisplay() {
+        function updateUserInfoDisplay(status = null) {
             const user = window.currentRoleUser;
-            const uid = window.currentUid || 'N/A';
-            const display = user 
-                ? `User: ${user.name} | Role: ${user.role.toUpperCase()} | App ID: ${user.id}`
-                : `User: N/A | Role: N/A | UID: ${uid.substring(0, 8)}...`;
+            let display = status;
+
+            if (!status) {
+                 display = user 
+                    ? `User: ${user.name} | Role: ${user.role.toUpperCase()}`
+                    : `Data Loaded. Select Role.`;
+            }
             document.getElementById('user-info').textContent = display;
         }
+        window.updateUserInfoDisplay = updateUserInfoDisplay;
+
 
         function renderRoleSelector() {
-            const roleContainer = document.querySelector('#role-modal .space-y-4');
+            const roleContainer = document.getElementById('role-selector-container');
+            if (!roleContainer) return;
+            
             roleContainer.innerHTML = window.allUserRoles.map(u => {
                 let color = u.role === 'employee' ? 'indigo' : u.role === 'manager' ? 'amber' : 'red';
                 let icon = u.role === 'employee' ? 'user' : u.role === 'manager' ? 'briefcase' : 'bar-chart-3';
@@ -478,7 +558,14 @@
         // --- VIEW RENDERERS (CALLED BY LISTENERS) ---
         function renderEmployeeTable() {
             const tableBody = document.getElementById('employee-expense-table');
-            const employeeExpenses = window.allExpenses.filter(e => e.userId === window.currentRoleUser.id);
+            if (!window.currentRoleUser || !window.isDataReady) {
+                tableBody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-stone-500">App data is still loading...</td></tr>`;
+                return;
+            }
+            
+            // Filter by the currently active user's ID
+            const userIdToFilter = window.currentRoleUser.id; 
+            const employeeExpenses = window.allExpenses.filter(e => e.userId === userIdToFilter);
             
             if (employeeExpenses.length === 0) {
                 tableBody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-stone-500">No expenses found for ${window.currentRoleUser.name}.</td></tr>`;
@@ -497,11 +584,17 @@
         }
 
         function renderManagerTables() {
-            const managerId = window.currentRoleUser.id;
+            const managerId = window.currentRoleUser ? window.currentRoleUser.id : null;
             const approvalTable = document.getElementById('manager-approval-table');
             const teamTable = document.getElementById('manager-team-table');
             
-            // Find all employees managed by the current user
+            if (!managerId || !window.isDataReady) {
+                approvalTable.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-stone-500">App data is still loading...</td></tr>`;
+                teamTable.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-stone-500">App data is still loading...</td></tr>`;
+                return;
+            }
+            
+            // Find all employees managed by the current manager's ID
             const teamIds = window.allUserRoles.filter(u => u.managerId === managerId).map(u => u.id); 
             const teamExpenses = window.allExpenses.filter(e => teamIds.includes(e.userId));
             
@@ -517,7 +610,7 @@
                         <td class="px-6 py-3">${e.date}</td>
                         <td class="px-6 py-3">${e.description}</td>
                         <td class="px-6 py-3 text-right">
-                            ${(e.amount * window.USD_RATE_MOCK[e.currency]).toFixed(2)} USD
+                            $${(e.amount * (window.USD_RATE_MOCK[e.currency] || 1)).toFixed(2)} USD
                         </td>
                         <td class="px-6 py-3 text-center space-x-2">
                             <button onclick="handleApproval('${e.docId}', 'Approved')" class="text-green-600 hover:text-green-800 font-medium p-1 rounded-lg">Approve</button>
@@ -534,8 +627,8 @@
                 teamTable.innerHTML = teamExpenses.map(e => `
                     <tr class="border-b hover:bg-stone-50">
                         <td class="px-6 py-3">${getUserById(e.userId).name}</td>
+                        <td class="px-6 py-3">${e.date}</td>
                         <td class="px-6 py-3">${e.description}</td>
-                        <td class="px-6 py-3">${e.category}</td>
                         <td class="px-6 py-3 text-right">${e.amount.toFixed(2)} ${e.currency}</td>
                         <td class="px-6 py-3 text-center">${getStatusBadge(e.status)}</td>
                     </tr>
@@ -553,7 +646,7 @@
             }, {});
 
             const categoryTotals = window.allExpenses.reduce((acc, e) => {
-                const usdAmount = e.amount * window.USD_RATE_MOCK[e.currency];
+                const usdAmount = e.amount * (window.USD_RATE_MOCK[e.currency] || 1);
                 acc[e.category] = (acc[e.category] || 0) + usdAmount;
                 return acc;
             }, {});
@@ -562,12 +655,14 @@
         }
 
         function renderAdminCharts() {
+            if (!window.isDataReady) return;
             const { statusCounts, categoryTotals } = calculateChartData();
 
             // 1. Status Chart
-            const statusCtx = document.getElementById('statusChart').getContext('2d');
+            const statusCtx = document.getElementById('statusChart');
+            if (!statusCtx) return;
             if (statusChart) statusChart.destroy();
-            statusChart = new Chart(statusCtx, {
+            statusChart = new Chart(statusCtx.getContext('2d'), {
                 type: 'doughnut',
                 data: {
                     labels: Object.keys(statusCounts),
@@ -581,9 +676,10 @@
             });
 
             // 2. Category Chart
-            const categoryCtx = document.getElementById('categoryChart').getContext('2d');
+            const categoryCtx = document.getElementById('categoryChart');
+            if (!categoryCtx) return;
             if (categoryChart) categoryChart.destroy();
-            categoryChart = new Chart(categoryCtx, {
+            categoryChart = new Chart(categoryCtx.getContext('2d'), {
                 type: 'bar',
                 data: {
                     labels: Object.keys(categoryTotals),
@@ -601,7 +697,9 @@
 
         // Switches the active role user based on the selected ID
         window.switchRole = (userId) => {
-            const user = window.allUserRoles.find(u => u.id === userId);
+            const idToFind = typeof userId === 'string' ? userId : parseInt(userId, 10);
+            const user = window.allUserRoles.find(u => u.id === idToFind);
+
             if (user) {
                 window.currentRoleUser = user;
                 window.switchView(user.role);
@@ -612,8 +710,10 @@
         
         // Switches the active view tab
         window.switchView = (viewName) => {
-            // Enable all nav buttons once data is loaded
-            document.querySelectorAll('.nav-btn').forEach(b => b.disabled = false);
+            if (!window.isDataReady) {
+                 window.showStatusMessage('Initialization', 'App data is still loading. Please wait a moment.', 'amber');
+                 return;
+            }
 
             document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
             const targetView = document.getElementById(`${viewName}-view`);
@@ -646,7 +746,8 @@
             if (!window.db) { window.showStatusMessage('Error', 'Database not connected.', 'red'); return; }
 
             try {
-                const expenseRef = window.doc(window.db, `artifacts/${window.appId}/public/data/expenses`, docId);
+                const expenseCollectionPath = `artifacts/${window.appId}/public/data/expenses`;
+                const expenseRef = window.doc(window.db, expenseCollectionPath, docId);
                 await window.updateDoc(expenseRef, {
                     status: newStatus,
                     managerId: window.currentRoleUser.id,
@@ -670,8 +771,9 @@
                 return;
             }
             
+            const expenseCollectionPath = `artifacts/${window.appId}/public/data/expenses`;
             const formData = new FormData(e.target);
-            const expenseCollectionRef = window.collection(window.db, `artifacts/${window.appId}/public/data/expenses`);
+            const expenseCollectionRef = window.collection(window.db, expenseCollectionPath);
             
             try {
                 const newExpense = {
@@ -681,7 +783,7 @@
                     category: formData.get('category'),
                     amount: parseFloat(formData.get('amount')),
                     currency: formData.get('currency').toUpperCase(),
-                    status: 'Pending', // New submissions are always Pending
+                    status: 'Pending', 
                     submittedAt: new Date().toISOString()
                 };
 
@@ -714,11 +816,10 @@
         window.closeModal = (modalId) => { document.getElementById(modalId).classList.replace('flex', 'hidden'); }
 
         // --- INITIALIZATION ---
-        window.onload = () => {
+        document.addEventListener('DOMContentLoaded', () => {
             window.initializeFirebase();
             lucide.createIcons();
-            // The view will be switched after Firebase auth/listeners complete
-        };
+        });
     </script>
 
 </body>
