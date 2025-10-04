@@ -48,32 +48,16 @@
         // --- Core Authentication and Setup ---
         window.initApp = async () => {
             const spinner = document.getElementById('loading-spinner');
-            const contentArea = document.getElementById('content-area');
             spinner.classList.remove('hidden');
             spinner.classList.add('flex', 'items-center', 'justify-center');
 
             try {
                 // --- CRITICAL SAFETY CHECK: Runs if config is missing (Local Mock Mode) ---
                 if (!hasFirebaseConfig || Object.keys(firebaseConfig).length === 0 || !firebaseConfig.projectId) {
-                    console.warn("Missing Firebase configuration. Running in Local Mock Mode (no real-time persistence or saving).");
+                    console.warn("Missing Firebase configuration. Running in Local Mock Mode.");
                     
                     // Set mock ready state and skip all Firebase calls
-                    // Use a special UID for a mock Manager profile for testing approvals
-                    userId = 'mock-manager-' + Math.random().toString(36).substring(2, 8); 
-                    userProfile.name = 'Local Manager';
-                    userProfile.role = 'Manager';
-                    
                     window.db = null; // Important: Null the DB instance
-                    window.getUserId = () => userId;
-                    window.getUserRole = () => userProfile.role;
-                    window.isAuthReady = () => true; 
-                    window.allExpenses = []; // Empty mock expense array
-                    
-                    // Expose mock users including an 'Employee' for submission testing
-                    window.demoUsers = {
-                        [userId]: userProfile,
-                        'mock-employee': { name: 'Mock Employee', role: 'Employee', managerId: userId, uid: 'mock-employee' }
-                    };
                     
                     // Expose mock utilities to prevent errors, but they won't save data
                     window.collection = (db, path) => ({ db, path }); 
@@ -84,27 +68,10 @@
                     window.updateDoc = async () => console.log('Mock update called.');
                     window.doc = () => {}; 
                     window.EXPENSES_COLLECTION = 'mock-collection';
-                    window.startExpenseListener = () => { 
-                        // Start with a mock pending expense for the manager to approve
-                        window.allExpenses.push({
-                            id: 'mock-pending-1',
-                            userId: 'mock-employee',
-                            userName: 'Mock Employee',
-                            date: new Date().toISOString().substring(0, 10),
-                            description: 'Mock expense awaiting approval',
-                            category: 'Meals',
-                            original_amount: 50.00,
-                            original_currency: 'EUR',
-                            base_amount: 50.00, // Fixed conversion
-                            status: 'Pending', 
-                            approverId: userId, // Set to the current mock manager
-                            submitted_on: new Date().toISOString()
-                        });
-                        window.calculateBaseAmounts(); 
-                    }; 
-
-                    // Update UI immediately
-                    window.setupApplication();
+                    window.startExpenseListener = () => { window.calculateBaseAmounts(); }; 
+                    
+                    // Set the app up to wait for role selection
+                    window.showRoleSelection();
                     return; 
                 }
                 // --- END OF CRITICAL SAFETY CHECK ---
@@ -129,42 +96,98 @@
                 onAuthStateChanged(authInstance, async (user) => {
                     if (user) {
                         userId = user.uid;
-                        await fetchOrCreateUserProfile(userId);
                         
-                        // 4. Expose all necessary resources to the global window object
-                        window.db = dbInstance; 
-                        window.auth = authInstance;
-                        window.getUserId = () => userId;
-                        window.getUserRole = () => userProfile.role;
-                        window.isAuthReady = () => isAuthReady;
-                        
-                        // Expose Firestore utility functions and collection constant
-                        window.collection = collection;
-                        window.doc = doc;
-                        window.addDoc = addDoc;
-                        window.updateDoc = updateDoc;
-                        window.getDoc = getDoc;
-                        window.EXPENSES_COLLECTION = EXPENSES_COLLECTION;
-
-                        // Call the main setup function in the global script
-                        window.setupApplication();
+                        // If Firebase is active, we go straight to role selection
+                        window.showRoleSelection();
                     } 
                 });
 
             } catch (error) {
                 console.error("Firebase Initialization or Auth Error:", error);
-                // If Firebase init fails, fall back to showing the content with an error message.
                 window.showModal('Fatal Error', 'Failed to initialize Firebase and authenticate. The application will not save data. Check console for details.');
                 
-                // Show content anyway
-                spinner.classList.add('hidden');
-                spinner.classList.remove('flex', 'items-center', 'justify-center');
-                contentArea.classList.remove('hidden');
+                // Show role selection anyway
+                window.showRoleSelection();
             }
         };
 
-        // --- User Profile Management ---
-        const fetchOrCreateUserProfile = async (uid) => {
+        // Function to show the role selection screen and hide the spinner
+        window.showRoleSelection = () => {
+            document.getElementById('loading-spinner').classList.add('hidden');
+            document.getElementById('role-selection').classList.remove('hidden');
+            lucide.createIcons();
+        }
+
+        // --- Role Selection Handler ---
+        window.selectRole = async (role) => {
+            document.getElementById('role-selection').classList.add('hidden');
+            document.getElementById('loading-spinner').classList.remove('hidden');
+            document.getElementById('loading-spinner').classList.add('flex');
+
+            let selectedRole = role;
+
+            if (window.db) {
+                // REAL MODE: Fetch or create profile based on actual UID and selected role
+                await fetchOrCreateUserProfile(userId, selectedRole);
+            } else {
+                // LOCAL MOCK MODE: Generate mock IDs based on selected role
+                
+                // 1. Assign local ID and profile based on role
+                const baseId = 'mock-' + selectedRole.toLowerCase();
+                userId = baseId + '-' + Math.random().toString(36).substring(2, 6);
+                
+                userProfile.role = selectedRole;
+                userProfile.name = `Local ${selectedRole}`;
+
+                // 2. Set up a dedicated Manager ID for cross-referencing
+                const managerId = 'mock-manager-default'; 
+                userProfile.managerId = managerId;
+                
+                // 3. Populate window.demoUsers map for cross-reference lookups
+                window.demoUsers = {
+                    [userId]: { ...userProfile, uid: userId },
+                    [managerId]: { name: 'Local Default Manager', role: 'Manager', managerId: null, uid: managerId }
+                };
+
+                // For the Employee role, ensure the Manager exists in the map
+                if (selectedRole === 'Employee') {
+                    // Create a manager for the employee to submit to
+                    window.demoUsers[managerId] = { name: 'Local Default Manager', role: 'Manager', managerId: null, uid: managerId };
+                } else if (selectedRole === 'Manager') {
+                    // Create an employee for the manager to approve
+                    const employeeId = 'mock-employee-' + Math.random().toString(36).substring(2, 6);
+                    window.demoUsers[employeeId] = { name: 'Mock Employee', role: 'Employee', managerId: userId, uid: employeeId };
+                    
+                    // Add a pending expense for the manager to see immediately
+                    window.allExpenses.push({
+                        id: 'mock-pending-1',
+                        userId: employeeId,
+                        userName: 'Mock Employee',
+                        date: new Date().toISOString().substring(0, 10),
+                        description: 'Mock expense awaiting approval',
+                        category: 'Meals',
+                        original_amount: 50.00,
+                        original_currency: 'EUR',
+                        base_amount: 50.00,
+                        status: 'Pending', 
+                        approverId: userId, // Manager's ID
+                        submitted_on: new Date().toISOString()
+                    });
+                }
+
+                // Expose global accessors for mock mode
+                window.getUserId = () => userId;
+                window.getUserRole = () => userProfile.role;
+                window.isAuthReady = () => true; 
+                window.allExpenses = window.allExpenses || [];
+            }
+            
+            // Proceed to main app setup
+            window.setupApplication();
+        }
+
+        // --- User Profile Management (Firebase) ---
+        const fetchOrCreateUserProfile = async (uid, selectedRole) => {
             if (!dbInstance) return;
 
             const profileRef = doc(dbInstance, USER_PROFILES_COLLECTION(uid), 'profile');
@@ -172,31 +195,22 @@
 
             if (profileSnap.exists()) {
                 userProfile = profileSnap.data();
-                console.log("Profile loaded:", userProfile);
+                // Override the role if the user explicitly chose one on the landing page
+                userProfile.role = selectedRole; 
+                setDoc(profileRef, userProfile).catch(e => console.error("Error updating profile role:", e));
             } else {
                 const shortUid = uid.substring(uid.length - 4);
                 
-                // Simple logic to create a 'Manager' profile for a specific user ID for testing
-                let initialRole = 'Employee';
-                let initialName = `User ${shortUid}`;
-                
-                // Set a specific UID to be the manager for easy testing
-                if (uid.endsWith('admin-manager-default')) { 
-                     initialRole = 'Manager';
-                     initialName = 'Default Manager';
-                }
-
                 userProfile = {
-                    name: initialName,
-                    role: initialRole,
+                    name: `User ${shortUid}`,
+                    role: selectedRole,
                     managerId: 'admin-manager-default', 
                     uid: uid
                 };
                 setDoc(profileRef, userProfile).catch(e => console.error("Error setting default profile:", e));
-                console.log("Default profile created:", userProfile);
             }
             
-            // This is crucial for cross-referencing in the manager view
+            // This is crucial for cross-referencing
             window.demoUsers = {
                 [uid]: userProfile,
                 'admin-manager-default': { name: 'Default Manager', role: 'Manager', managerId: null, uid: 'admin-manager-default' }
@@ -256,6 +270,7 @@
             --primary-color: #008a00; /* Odoo Green */
             --secondary-color: #00b466; 
             --text-color: #333;
+            --odoo-blue: #007bff;
         }
         body {
             font-family: 'Inter', sans-serif;
@@ -309,6 +324,24 @@
             background-color: rgba(0, 0, 0, 0.2);
             border-radius: 10px;
         }
+        .role-card {
+            background-color: white;
+            padding: 2rem;
+            border-radius: 1.5rem;
+            transition: transform 0.2s, box-shadow 0.2s;
+            cursor: pointer;
+            border: 2px solid #e0e0e0;
+        }
+        .role-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
+        }
+        .role-employee { border-color: #008a00; }
+        .role-manager { border-color: var(--odoo-blue); }
+        .role-admin { border-color: #dc3545; }
+        .role-text-employee { color: #008a00; }
+        .role-text-manager { color: var(--odoo-blue); }
+        .role-text-admin { color: #dc3545; }
     </style>
 </head>
 <body>
@@ -330,9 +363,36 @@
                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                     <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
-                <p class="mt-2 text-gray-600">Connecting to database and fetching expenses...</p>
+                <p class="mt-2 text-gray-600">Connecting to database...</p>
             </div>
 
+            <!-- New Role Selection Screen -->
+            <div id="role-selection" class="hidden flex flex-col items-center justify-center min-h-full py-12">
+                <h2 class="text-3xl font-bold mb-10 text-odoo-green">Select Your Role</h2>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-4xl w-full">
+                    
+                    <div class="role-card role-employee shadow-lg" onclick="window.selectRole('Employee')">
+                        <i data-lucide="user" class="w-10 h-10 mb-4 role-text-employee"></i>
+                        <h3 class="text-2xl font-bold mb-2 role-text-employee">Employee</h3>
+                        <p class="text-gray-600">Submit, track, and view the status of your expense claims.</p>
+                    </div>
+
+                    <div class="role-card role-manager shadow-lg" onclick="window.selectRole('Manager')">
+                        <i data-lucide="shield" class="w-10 h-10 mb-4 role-text-manager"></i>
+                        <h3 class="text-2xl font-bold mb-2 role-text-manager">Manager</h3>
+                        <p class="text-gray-600">Review, approve, or reject pending expense claims from your team.</p>
+                    </div>
+                    
+                    <div class="role-card role-admin shadow-lg" onclick="window.selectRole('Admin')">
+                        <i data-lucide="settings" class="w-10 h-10 mb-4 role-text-admin"></i>
+                        <h3 class="text-2xl font-bold mb-2 role-text-admin">Admin</h3>
+                        <p class="text-gray-600">Access to all data and high-level configuration options.</p>
+                    </div>
+                </div>
+                <p class="mt-8 text-sm text-gray-500">Note: In Local Mock Mode, selecting a role dynamically sets up your test data.</p>
+            </div>
+            
+            <!-- Tab Content Area -->
             <div id="content-area" class="space-y-10 hidden">
                 <!-- Tabs for main navigation -->
                 <div class="flex border-b border-gray-200">
@@ -523,14 +583,31 @@
             managerTab.style.display = (role === 'Manager' || role === 'Admin') ? 'block' : 'none';
             adminTab.style.display = (role === 'Admin') ? 'block' : 'none';
 
-            // 3. Render Content
+            // 3. Hide loading/role selection and show main content
+            document.getElementById('loading-spinner').classList.add('hidden');
+            document.getElementById('loading-spinner').classList.remove('flex', 'items-center', 'justify-center');
+            document.getElementById('role-selection').classList.add('hidden');
+            document.getElementById('content-area').classList.remove('hidden');
+
+            // 4. Render Content
             renderContent();
 
-            // 4. Activate Dashboard tab and icons
+            // 5. Activate Dashboard tab and icons
             const dashboardButton = document.querySelector('.tab-button[data-tab="dashboard"]');
-            if (dashboardButton && !dashboardButton.classList.contains('border-odoo-green')) {
-                dashboardButton.click();
+            if (dashboardButton) {
+                // Ensure only the dashboard is active on initial load
+                document.querySelectorAll('.tab-button').forEach(btn => {
+                    btn.classList.remove('border-odoo-green', 'text-odoo-green');
+                    btn.classList.add('text-gray-500', 'border-transparent');
+                });
+                document.querySelectorAll('.tab-pane').forEach(pane => {
+                    pane.classList.add('hidden');
+                });
+                
+                dashboardButton.classList.add('border-odoo-green', 'text-odoo-green');
+                document.getElementById('dashboard').classList.remove('hidden');
             }
+
             lucide.createIcons();
         };
 
@@ -552,22 +629,13 @@
          */
         window.calculateBaseAmounts = () => {
             // Update all expenses with calculated base_amount (fixed at 1:1 conversion for stability)
-            window.allExpenses = window.allExpenses.map(expense => {
+            window.allExpenses = (window.allExpenses || []).map(expense => {
                 // Ensure number types are used for calculations
                 const original_amount = parseFloat(expense.original_amount); 
                 expense.base_amount = original_amount; 
                 return expense;
             });
 
-            // Hide spinner and show content only after the first data load + conversion
-            const spinner = document.getElementById('loading-spinner');
-            const contentArea = document.getElementById('content-area');
-            if(spinner.classList.contains('flex') || spinner.classList.contains('animate-spin')){
-                 spinner.classList.add('hidden');
-                 spinner.classList.remove('flex', 'items-center', 'justify-center');
-                 contentArea.classList.remove('hidden');
-            }
-            
             updateUI();
         };
 
@@ -577,7 +645,14 @@
             const listEl = document.getElementById('employee-expense-list');
             listEl.innerHTML = '';
             
-            const userExpenses = window.allExpenses.filter(e => e.userId === currentUserId)
+            // In local mode, we need to handle the mock employee case
+            let targetUserId = currentUserId;
+            if (!window.db && userProfile.role === 'Manager') {
+                // If a manager is signed in locally, they won't see any expenses unless they switch roles.
+                // We'll show their own expenses (which should be 0 unless they submitted one).
+            }
+
+            const userExpenses = window.allExpenses.filter(e => e.userId === targetUserId)
                 .sort((a, b) => new Date(b.date) - new Date(a.date));
 
             if (userExpenses.length === 0) {
@@ -622,7 +697,9 @@
 
             expensesForApproval.forEach(expense => {
                 // Look up the submitter's name
-                const userName = userProfilesMap[expense.userId]?.name || expense.userName || 'Unknown User';
+                const submitterProfile = window.demoUsers[expense.userId];
+                const userName = submitterProfile?.name || expense.userName || 'Unknown User';
+                
                 const row = `
                     <tr class="hover:bg-gray-50">
                         <td class="px-3 py-3 whitespace-nowrap text-sm font-medium text-gray-800">${userName}</td>
@@ -682,21 +759,21 @@
                 // MOCK: Base amount is set to original amount (1:1 conversion) to avoid API dependency
                 const base_amount = original_amount; 
 
-                // Determine the submitting user's information based on mode
+                // Determine the submitting user's information
                 let submitUserId = currentUserId;
                 let submitUserName = userProfile.name;
-                // Assign to the manager set in the user profile (or the default manager ID)
-                let approverId = userProfile.managerId || 'admin-manager-default'; 
+                
+                // Get the manager ID from the user profile
+                let approverId = userProfile.managerId; 
+                
+                if (!approverId) {
+                     // Fallback for Admins or Managers who might not have an assigned manager
+                     approverId = currentUserId; 
+                }
 
-                if (!window.db) {
-                     // In mock mode, we assume the user submitting is the 'mock-employee' for testing purposes, 
-                     // and the current user (mock-manager) will approve it.
-                     const mockEmployee = window.demoUsers['mock-employee'];
-                     if (mockEmployee && window.getUserRole() === 'Manager') {
-                        submitUserId = mockEmployee.uid;
-                        submitUserName = mockEmployee.name;
-                        approverId = currentUserId; // The current user (mock manager) approves mock employee's claim
-                     }
+                if (!window.db && userProfile.role === 'Employee') {
+                    // In mock mode, an Employee submits to the default mock manager
+                    approverId = window.demoUsers[userProfile.managerId]?.uid || 'mock-manager-default'; 
                 }
                 
                 // Construct the new expense object
