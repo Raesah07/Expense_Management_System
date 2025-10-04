@@ -714,3 +714,203 @@
     </script>
 </body>
 </html>
+<td class="px-3 py-3 whitespace-nowrap text-center space-x-2">
+                                        <button onclick="window.handleApproval('${expense.id}', 'Approved')" 
+                                            class="bg-green-500 hover:bg-green-600 text-white p-2 rounded-lg text-xs font-semibold shadow-sm">
+                                            Approve
+                                        </button>
+                                        <button onclick="window.handleApproval('${expense.id}', 'Rejected')" 
+                                            class="bg-red-500 hover:bg-red-600 text-white p-2 rounded-lg text-xs font-semibold shadow-sm">
+                                            Reject
+                                        </button>
+                                    </td>
+                    </tr>
+                `;
+                listEl.innerHTML += row;
+            });
+        };
+
+        const renderAdminConfig = () => {
+            const listEl = document.getElementById('admin-user-list');
+            listEl.innerHTML = '';
+
+            Object.entries(window.demoUsers).forEach(([id, user]) => {
+                const userDiv = document.createElement('div');
+                userDiv.className = 'flex justify-between items-center p-3 bg-gray-50 rounded-lg border border-gray-100';
+                userDiv.innerHTML = `
+                    <span class="font-medium text-gray-800">${user.name}</span>
+                    <span class="text-sm font-bold text-odoo-green">${user.role}</span>
+                `;
+                listEl.appendChild(userDiv);
+            });
+        };
+
+        // --- Event Handlers and Main Logic ---
+
+        /**
+         * Main setup function called after Firebase/Auth readiness.
+         */
+        const setupApplication = async () => {
+            // 1. Populate User Selector
+            const selector = document.getElementById('user-selector');
+            for (const [id, user] of Object.entries(window.demoUsers)) {
+                const option = document.createElement('option');
+                option.value = id;
+                option.textContent = `${user.name} (${user.role})`;
+                selector.appendChild(option);
+            }
+
+            // 2. Load Demo Data
+            // NOTE: In a real app, Firestore snapshot listeners would update 'allExpenses'
+            allExpenses = [...window.staticExpenses]; // Use spread operator to avoid modifying static data
+
+            // 3. Calculate Base Amounts for all initial expenses
+            await calculateBaseAmounts();
+            
+            // 4. Initialize Tabs
+            document.querySelectorAll('.tab-button').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    // De-activate all tabs
+                    document.querySelectorAll('.tab-button').forEach(btn => {
+                        btn.classList.remove('text-odoo-green', 'border-odoo-green');
+                        btn.classList.add('text-gray-500', 'hover:text-gray-700');
+                    });
+                    // Hide all panes
+                    document.querySelectorAll('.tab-pane').forEach(pane => {
+                        pane.classList.add('hidden');
+                    });
+
+                    // Activate selected tab and show its pane
+                    const tab = e.target.dataset.tab;
+                    e.target.classList.add('text-odoo-green', 'border-odoo-green');
+                    e.target.classList.remove('text-gray-500', 'hover:text-gray-700');
+                    document.getElementById(tab).classList.remove('hidden');
+                    
+                    // Re-render content specific to the tab for up-to-date data
+                    if (tab === 'dashboard') renderEmployeeDashboard();
+                    if (tab === 'manager') renderManagerApprovals();
+                    if (tab === 'admin') renderAdminConfig();
+                });
+            });
+
+            // 5. Initial UI Render
+            updateUI();
+        };
+
+        /**
+         * Switches the currently active user and updates the UI.
+         * @param {string} newUserId - The ID of the user to switch to.
+         */
+        window.switchUser = (newUserId) => {
+            currentUserId = newUserId;
+            // Re-evaluate role and re-render everything
+            updateUI();
+        };
+
+
+        /**
+         * Handles the submission of a new expense claim.
+         */
+        window.submitExpense = async (event) => {
+            event.preventDefault();
+            const submitButton = document.getElementById('submit-button');
+            const submitText = document.getElementById('submit-text');
+            const submitSpinner = document.getElementById('submit-spinner');
+
+            submitButton.disabled = true;
+            submitText.textContent = 'Submitting...';
+            submitSpinner.classList.remove('hidden');
+
+            try {
+                const date = document.getElementById('exp-date').value;
+                const category = document.getElementById('exp-category').value;
+                const description = document.getElementById('exp-description').value;
+                const original_amount = parseFloat(document.getElementById('exp-amount').value);
+                const original_currency = document.getElementById('exp-currency').value;
+                
+                // 1. Get user and manager info
+                const user = window.demoUsers[currentUserId];
+                const approverId = user.managerId || window.userManagerId;
+
+                // 2. Fetch exchange rate and calculate base amount
+                const rate = await window.fetchExchangeRate(original_currency, window.companyBaseCurrency);
+                let base_amount = original_amount;
+                if (original_currency !== window.companyBaseCurrency) {
+                    base_amount = Math.round(original_amount * rate * 100) / 100;
+                }
+
+                // 3. Create new expense object
+                const newExpense = {
+                    id: `exp-${Date.now()}`, // Simple unique ID for demo
+                    userId: currentUserId,
+                    userName: user.name,
+                    date,
+                    description,
+                    category,
+                    original_amount,
+                    original_currency,
+                    base_amount,
+                    status: 'Pending', // New expenses start as Pending
+                    approverId: approverId
+                };
+
+                // 4. Save (in-memory for demo, would be Firebase here)
+                allExpenses.push(newExpense);
+
+                // 5. Success feedback and reset
+                window.showModal('Success! 🚀', 'Your expense claim has been submitted for approval.');
+                document.getElementById('expense-form').reset();
+                
+                // Re-render the dashboard to show the new expense
+                renderEmployeeDashboard(); 
+
+            } catch (error) {
+                console.error("Expense submission failed:", error);
+                window.showModal('Submission Failed', `An error occurred while submitting: ${error.message}`);
+            } finally {
+                submitButton.disabled = false;
+                submitText.textContent = 'Submit Claim';
+                submitSpinner.classList.add('hidden');
+            }
+        };
+
+        /**
+         * Handles the approval or rejection of an expense by a Manager.
+         * @param {string} expenseId - The ID of the expense to update.
+         * @param {('Approved'|'Rejected')} status - The new status.
+         */
+        window.handleApproval = (expenseId, status) => {
+            const expenseIndex = allExpenses.findIndex(e => e.id === expenseId);
+
+            if (expenseIndex !== -1) {
+                const expense = allExpenses[expenseIndex];
+                
+                // Simple check to prevent double-approval/rejection
+                if (expense.status === status) {
+                    window.showModal('Status Error', `Expense is already **${status}**.`);
+                    return;
+                }
+
+                // Update the status in the in-memory array
+                allExpenses[expenseIndex] = {
+                    ...expense,
+                    status: status
+                };
+                
+                window.showModal('Action Complete', `Expense for **${expense.userName}** has been **${status}**.`);
+                
+                // Re-render the Manager Approvals list to remove the processed item
+                renderManagerApprovals();
+                // Re-render the Employee Dashboard so the employee can see the update
+                renderEmployeeDashboard();
+
+            } else {
+                window.showModal('Error', 'Expense not found.');
+            }
+        };
+
+        // Ensure setupApplication is defined before it's called inside onAuthStateChanged or the fallback
+        window.setupApplication = setupApplication;
+    </script>
+</body>
+</html>
