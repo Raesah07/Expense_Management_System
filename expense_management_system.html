@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Expense Management System</title>
+    <title>Odoo Expense Management System</title>
     <!-- Load Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Inter Font -->
@@ -692,7 +692,7 @@
                      // In mock mode, we assume the user submitting is the 'mock-employee' for testing purposes, 
                      // and the current user (mock-manager) will approve it.
                      const mockEmployee = window.demoUsers['mock-employee'];
-                     if (mockEmployee && userProfile.role === 'Manager') {
+                     if (mockEmployee && window.getUserRole() === 'Manager') {
                         submitUserId = mockEmployee.uid;
                         submitUserName = mockEmployee.name;
                         approverId = currentUserId; // The current user (mock manager) approves mock employee's claim
@@ -741,7 +741,6 @@
 
         /**
          * Handles the approval or rejection of an expense claim.
-         * THIS IS THE CRUCIAL NEW LOGIC.
          */
         window.handleApproval = async (expenseId, newStatus, event) => {
             if (!window.isAuthReady()) {
