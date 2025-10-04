@@ -53,20 +53,26 @@
             spinner.classList.add('flex', 'items-center', 'justify-center');
 
             try {
-                // --- CRITICAL SAFETY CHECK ADDED HERE ---
+                // --- CRITICAL SAFETY CHECK: Runs if config is missing (Local Mock Mode) ---
                 if (!hasFirebaseConfig || Object.keys(firebaseConfig).length === 0 || !firebaseConfig.projectId) {
                     console.warn("Missing Firebase configuration. Running in Local Mock Mode (no real-time persistence or saving).");
                     
                     // Set mock ready state and skip all Firebase calls
-                    userId = 'mock-user-' + Math.random().toString(36).substring(2, 8);
+                    // Use a special UID for a mock Manager profile for testing approvals
+                    userId = 'mock-manager-' + Math.random().toString(36).substring(2, 8); 
+                    userProfile.name = 'Local Manager';
+                    userProfile.role = 'Manager';
+                    
                     window.db = null; // Important: Null the DB instance
                     window.getUserId = () => userId;
                     window.getUserRole = () => userProfile.role;
                     window.isAuthReady = () => true; 
                     window.allExpenses = []; // Empty mock expense array
+                    
+                    // Expose mock users including an 'Employee' for submission testing
                     window.demoUsers = {
                         [userId]: userProfile,
-                        'manager-1': { name: 'Local Manager', role: 'Manager', managerId: null, uid: 'manager-1' }
+                        'mock-employee': { name: 'Mock Employee', role: 'Employee', managerId: userId, uid: 'mock-employee' }
                     };
                     
                     // Expose mock utilities to prevent errors, but they won't save data
@@ -78,7 +84,24 @@
                     window.updateDoc = async () => console.log('Mock update called.');
                     window.doc = () => {}; 
                     window.EXPENSES_COLLECTION = 'mock-collection';
-                    window.startExpenseListener = () => { window.calculateBaseAmounts(); }; 
+                    window.startExpenseListener = () => { 
+                        // Start with a mock pending expense for the manager to approve
+                        window.allExpenses.push({
+                            id: 'mock-pending-1',
+                            userId: 'mock-employee',
+                            userName: 'Mock Employee',
+                            date: new Date().toISOString().substring(0, 10),
+                            description: 'Mock expense awaiting approval',
+                            category: 'Meals',
+                            original_amount: 50.00,
+                            original_currency: 'EUR',
+                            base_amount: 50.00, // Fixed conversion
+                            status: 'Pending', 
+                            approverId: userId, // Set to the current mock manager
+                            submitted_on: new Date().toISOString()
+                        });
+                        window.calculateBaseAmounts(); 
+                    }; 
 
                     // Update UI immediately
                     window.setupApplication();
@@ -152,9 +175,20 @@
                 console.log("Profile loaded:", userProfile);
             } else {
                 const shortUid = uid.substring(uid.length - 4);
+                
+                // Simple logic to create a 'Manager' profile for a specific user ID for testing
+                let initialRole = 'Employee';
+                let initialName = `User ${shortUid}`;
+                
+                // Set a specific UID to be the manager for easy testing
+                if (uid.endsWith('admin-manager-default')) { 
+                     initialRole = 'Manager';
+                     initialName = 'Default Manager';
+                }
+
                 userProfile = {
-                    name: `User ${shortUid}`,
-                    role: 'Employee',
+                    name: initialName,
+                    role: initialRole,
                     managerId: 'admin-manager-default', 
                     uid: uid
                 };
@@ -162,6 +196,7 @@
                 console.log("Default profile created:", userProfile);
             }
             
+            // This is crucial for cross-referencing in the manager view
             window.demoUsers = {
                 [uid]: userProfile,
                 'admin-manager-default': { name: 'Default Manager', role: 'Manager', managerId: null, uid: 'admin-manager-default' }
@@ -465,6 +500,7 @@
                 return;
             }
 
+            // Ensure the userProfilesMap includes all known demo users for lookups
             userProfilesMap = {
                 ...window.demoUsers 
             };
@@ -472,7 +508,7 @@
             // 1. Update Header Info
             document.getElementById('user-info').textContent = `${userProfile.name} (${userProfile.role})`;
             
-            // Check if Firebase is active before trying to show full UID
+            // Display User ID (shortened for aesthetics, full ID in console)
             if (window.db) {
                 document.getElementById('user-id-display').textContent = `ID: ${currentUserId.substring(0, 8)}...`;
             } else {
@@ -517,7 +553,9 @@
         window.calculateBaseAmounts = () => {
             // Update all expenses with calculated base_amount (fixed at 1:1 conversion for stability)
             window.allExpenses = window.allExpenses.map(expense => {
-                expense.base_amount = expense.original_amount; 
+                // Ensure number types are used for calculations
+                const original_amount = parseFloat(expense.original_amount); 
+                expense.base_amount = original_amount; 
                 return expense;
             });
 
@@ -572,6 +610,7 @@
             listEl.innerHTML = '';
             const managerId = currentUserId; 
 
+            // Filter for expenses that are Pending AND assigned to this manager's ID
             const expensesForApproval = window.allExpenses.filter(e => 
                 e.status === 'Pending' && e.approverId === managerId
             ).sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -582,7 +621,8 @@
             }
 
             expensesForApproval.forEach(expense => {
-                const userName = userProfilesMap[expense.userId]?.name || 'Unknown User';
+                // Look up the submitter's name
+                const userName = userProfilesMap[expense.userId]?.name || expense.userName || 'Unknown User';
                 const row = `
                     <tr class="hover:bg-gray-50">
                         <td class="px-3 py-3 whitespace-nowrap text-sm font-medium text-gray-800">${userName}</td>
@@ -596,11 +636,11 @@
                         </td>
                         <td class="px-3 py-3 whitespace-nowrap text-center space-x-2">
                             <button onclick="window.handleApproval('${expense.id}', 'Approved', event)" 
-                                class="bg-green-500 hover:bg-green-600 text-white p-2 rounded-lg text-xs font-semibold shadow-sm">
+                                class="bg-green-500 hover:bg-green-600 text-white p-2 rounded-lg text-xs font-semibold shadow-sm approval-btn" data-id="${expense.id}">
                                 Approve
                             </button>
                             <button onclick="window.handleApproval('${expense.id}', 'Rejected', event)" 
-                                class="bg-red-500 hover:bg-red-600 text-white p-2 rounded-lg text-xs font-semibold shadow-sm">
+                                class="bg-red-500 hover:bg-red-600 text-white p-2 rounded-lg text-xs font-semibold shadow-sm approval-btn" data-id="${expense.id}">
                                 Reject
                             </button>
                         </td>
@@ -642,10 +682,27 @@
                 // MOCK: Base amount is set to original amount (1:1 conversion) to avoid API dependency
                 const base_amount = original_amount; 
 
+                // Determine the submitting user's information based on mode
+                let submitUserId = currentUserId;
+                let submitUserName = userProfile.name;
+                // Assign to the manager set in the user profile (or the default manager ID)
+                let approverId = userProfile.managerId || 'admin-manager-default'; 
+
+                if (!window.db) {
+                     // In mock mode, we assume the user submitting is the 'mock-employee' for testing purposes, 
+                     // and the current user (mock-manager) will approve it.
+                     const mockEmployee = window.demoUsers['mock-employee'];
+                     if (mockEmployee && userProfile.role === 'Manager') {
+                        submitUserId = mockEmployee.uid;
+                        submitUserName = mockEmployee.name;
+                        approverId = currentUserId; // The current user (mock manager) approves mock employee's claim
+                     }
+                }
+                
                 // Construct the new expense object
                 const newExpenseData = {
-                    userId: currentUserId,
-                    userName: userProfile.name,
+                    userId: submitUserId,
+                    userName: submitUserName,
                     date: document.getElementById('exp-date').value,
                     description: document.getElementById('exp-description').value,
                     category: document.getElementById('exp-category').value,
@@ -653,7 +710,7 @@
                     original_currency: original_currency,
                     base_amount: base_amount,
                     status: 'Pending', 
-                    approverId: userProfile.managerId || 'admin-manager-default', 
+                    approverId: approverId, 
                     submitted_on: new Date().toISOString()
                 };
 
@@ -663,9 +720,10 @@
                     await window.addDoc(expensesCollectionRef, newExpenseData);
                     window.showModal('Success!', `Expense claim submitted successfully for approval. Value: $${base_amount.toFixed(2)} USD.`);
                 } else {
-                    // Local Mock Mode: Add to the local array and reset form
-                    window.allExpenses.push({ ...newExpenseData, id: 'mock-' + window.allExpenses.length });
-                    renderContent(); // Rerender to show the new expense in the table
+                    // Local Mock Mode: Add to the local array
+                    const newMockExpense = { ...newExpenseData, id: 'mock-' + (window.allExpenses.length + 1) };
+                    window.allExpenses.push(newMockExpense);
+                    renderContent(); // Rerender to show the new expense
                     window.showModal('Success (Local Mode)!', `Expense claim submitted to local history. It was NOT saved to the database.`);
                 }
                 
@@ -681,33 +739,52 @@
             }
         };
 
+        /**
+         * Handles the approval or rejection of an expense claim.
+         * THIS IS THE CRUCIAL NEW LOGIC.
+         */
         window.handleApproval = async (expenseId, newStatus, event) => {
             if (!window.isAuthReady()) {
                 window.showModal('Initialization Error', 'Application is still connecting to the database. Please wait a moment and try again.');
                 return;
             }
             
-             const approvalBtn = event.target;
-             approvalBtn.disabled = true;
-             approvalBtn.textContent = '...';
+            const approvalBtn = event.target;
+            const originalText = approvalBtn.textContent;
 
+            // Find all buttons for this expense and disable them
+            document.querySelectorAll(`.approval-btn[data-id="${expenseId}"]`).forEach(btn => {
+                btn.disabled = true;
+                btn.textContent = '...';
+            });
+            
             try {
                 if (window.db) {
-                    // Real-time update
+                    // --- REAL-TIME UPDATE LOGIC (Firestore) ---
+                    
                     const expenseDocRef = window.doc(window.db, window.EXPENSES_COLLECTION, expenseId);
+                    
                     await window.updateDoc(expenseDocRef, {
                         status: newStatus,
                         approvedBy: currentUserId,
                         approvalDate: new Date().toISOString()
                     });
+                    
                     window.showModal(`Expense ${newStatus}`, `Claim #${expenseId.substring(0, 8)}... has been ${newStatus}.`);
+                    
+                    // The onSnapshot listener will automatically handle the UI refresh (removing the row)
+
                 } else {
-                    // Local Mock Mode: Update the status locally
+                    // --- LOCAL MOCK MODE UPDATE LOGIC ---
+                    
                     const expenseIndex = window.allExpenses.findIndex(e => e.id === expenseId);
                     if (expenseIndex !== -1) {
+                        // Update the local object properties
                         window.allExpenses[expenseIndex].status = newStatus;
                         window.allExpenses[expenseIndex].approvedBy = currentUserId;
-                        renderContent(); // Rerender the approval list
+                        
+                        // Manually trigger the re-render for local mode
+                        renderContent(); 
                         window.showModal(`Action Successful (Local Mode)`, `Claim updated to ${newStatus} locally.`);
                     }
                 }
@@ -716,9 +793,11 @@
                 console.error(`Error ${newStatus}ing expense:`, e);
                 window.showModal('Action Failed', `Failed to update expense status: ${e.message}`);
             } finally {
-                 // The onSnapshot listener (or renderContent in mock mode) handles refreshing the UI, so we just re-enable buttons.
-                 approvalBtn.disabled = false;
-                 approvalBtn.textContent = newStatus;
+                 // Re-enable buttons only if an error occurred before the refresh could happen
+                 document.querySelectorAll(`.approval-btn[data-id="${expenseId}"]`).forEach(btn => {
+                     btn.disabled = false;
+                     btn.textContent = originalText;
+                 });
             }
         };
 
