@@ -12,9 +12,9 @@
     <script src="https://unpkg.com/lucide@latest"></script>
     <!-- Load Firebase Modules -->
     <script type="module">
-        // Import necessary Firebase functions
+        // Import necessary Firebase functions, including signOut for the new feature
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, doc, setDoc, addDoc, onSnapshot, getDoc, updateDoc, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // Global variables provided by the Canvas environment (with robust safety check)
@@ -115,6 +115,7 @@
         window.showRoleSelection = () => {
             document.getElementById('loading-spinner').classList.add('hidden');
             document.getElementById('role-selection').classList.remove('hidden');
+            document.getElementById('change-role-btn').classList.add('hidden'); // Ensure button is hidden here
             lucide.createIcons();
         }
 
@@ -185,6 +186,36 @@
             // Proceed to main app setup
             window.setupApplication();
         }
+        
+        // --- NEW LOGIC: Logout/Role Change Handler ---
+        window.logoutAndShowRoleSelection = async () => {
+            // 1. Reset critical state variables
+            userId = null;
+            userProfile = { name: 'Local User', role: 'Employee', managerId: 'manager-1' };
+            window.allExpenses = [];
+            window.demoUsers = {};
+            
+            // 2. Clear UI
+            document.getElementById('content-area').classList.add('hidden');
+            document.getElementById('user-info').textContent = 'Loading User...';
+            document.getElementById('user-id-display').textContent = 'ID: ...';
+
+            // 3. Optional: Sign out from Firebase if connected
+            if (window.auth) {
+                try {
+                    await signOut(window.auth);
+                    console.log("User successfully signed out from Firebase.");
+                } catch (e) {
+                    console.error("Error during Firebase sign out:", e);
+                }
+            }
+
+            // 4. Show the selection screen
+            window.showRoleSelection();
+            
+            // 5. Re-run initApp to re-authenticate (anonymously) and prepare for new role selection
+            window.initApp();
+        };
 
         // --- User Profile Management (Firebase) ---
         const fetchOrCreateUserProfile = async (uid, selectedRole) => {
@@ -353,6 +384,8 @@
             <div class="flex items-center space-x-4">
                 <div id="user-info" class="text-sm md:text-base font-medium">Loading User...</div>
                 <p id="user-id-display" class="text-xs font-mono bg-white text-gray-800 p-1 rounded-md">ID: ...</p>
+                <!-- NEW BUTTON: Allows switching roles -->
+                <button id="change-role-btn" onclick="window.logoutAndShowRoleSelection()" class="text-sm font-semibold py-1 px-3 rounded-lg bg-white bg-opacity-20 hover:bg-opacity-30 transition duration-150 hidden">Change Role</button>
             </div>
         </header>
 
@@ -366,7 +399,7 @@
                 <p class="mt-2 text-gray-600">Connecting to database...</p>
             </div>
 
-            <!-- New Role Selection Screen -->
+            <!-- Role Selection Screen -->
             <div id="role-selection" class="hidden flex flex-col items-center justify-center min-h-full py-12">
                 <h2 class="text-3xl font-bold mb-10 text-odoo-green">Select Your Role</h2>
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-4xl w-full">
@@ -540,7 +573,7 @@
         
         let userProfilesMap = {}; 
         let currentUserId = null;
-        let userProfile = {};
+        // userProfile is now defined in the module scope above
         
         // Helper function to show custom modal (replaces alert/confirm)
         window.showModal = (title, message) => {
@@ -575,7 +608,10 @@
                  document.getElementById('user-id-display').textContent = `ID: LOCAL`;
             }
             
-            // 2. Hide/Show Role-Specific Tabs
+            // 2. Show the Change Role button
+            document.getElementById('change-role-btn').classList.remove('hidden');
+
+            // 3. Hide/Show Role-Specific Tabs
             const managerTab = document.getElementById('manager-tab');
             const adminTab = document.getElementById('admin-tab');
             const role = userProfile.role;
@@ -583,16 +619,16 @@
             managerTab.style.display = (role === 'Manager' || role === 'Admin') ? 'block' : 'none';
             adminTab.style.display = (role === 'Admin') ? 'block' : 'none';
 
-            // 3. Hide loading/role selection and show main content
+            // 4. Hide loading/role selection and show main content
             document.getElementById('loading-spinner').classList.add('hidden');
             document.getElementById('loading-spinner').classList.remove('flex', 'items-center', 'justify-center');
             document.getElementById('role-selection').classList.add('hidden');
             document.getElementById('content-area').classList.remove('hidden');
 
-            // 4. Render Content
+            // 5. Render Content
             renderContent();
 
-            // 5. Activate Dashboard tab and icons
+            // 6. Activate Dashboard tab and icons
             const dashboardButton = document.querySelector('.tab-button[data-tab="dashboard"]');
             if (dashboardButton) {
                 // Ensure only the dashboard is active on initial load
@@ -645,12 +681,8 @@
             const listEl = document.getElementById('employee-expense-list');
             listEl.innerHTML = '';
             
-            // In local mode, we need to handle the mock employee case
-            let targetUserId = currentUserId;
-            if (!window.db && userProfile.role === 'Manager') {
-                // If a manager is signed in locally, they won't see any expenses unless they switch roles.
-                // We'll show their own expenses (which should be 0 unless they submitted one).
-            }
+            // We use the authenticated/mock user's ID
+            const targetUserId = currentUserId;
 
             const userExpenses = window.allExpenses.filter(e => e.userId === targetUserId)
                 .sort((a, b) => new Date(b.date) - new Date(a.date));
