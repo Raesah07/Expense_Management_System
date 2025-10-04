@@ -15,8 +15,7 @@
         // Import necessary Firebase functions
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        // NOTE: We rely on the core functions being exported to window later
-        import { getFirestore, collection, doc, setDoc, addDoc, onSnapshot, getDoc, updateDoc, query, orderBy, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, doc, setDoc, addDoc, onSnapshot, getDoc, updateDoc, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // Global variables provided by the Canvas environment
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
@@ -25,12 +24,11 @@
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
         // Global application state variables
-        let dbInstance = null; // Use a distinct name for internal reference
+        let dbInstance = null;
         let authInstance = null;
         let userId = null;
         let userProfile = { name: 'Loading', role: 'Employee', managerId: 'manager-1' };
         let isAuthReady = false;
-        let currentUserId = null;
         
         // --- Firestore Collection Paths ---
         const USER_PROFILES_COLLECTION = (uid) => `artifacts/${appId}/users/${uid}/profiles`;
@@ -70,7 +68,6 @@
                 onAuthStateChanged(authInstance, async (user) => {
                     if (user) {
                         userId = user.uid;
-                        currentUserId = userId; 
                         
                         // Wait for profile load before marking ready
                         await fetchOrCreateUserProfile(userId);
@@ -95,7 +92,7 @@
 
                     } else {
                         console.error("User not authenticated after init.");
-                        // Handle unauthenticated state if necessary
+                        // This might happen if token expired, we rely on the anonymous sign-in above.
                     }
                 });
 
@@ -107,7 +104,7 @@
             }
         };
 
-        // --- User Profile Management (New Firestore Logic) ---
+        // --- User Profile Management ---
         const fetchOrCreateUserProfile = async (uid) => {
             const profileRef = doc(dbInstance, USER_PROFILES_COLLECTION(uid), 'profile');
             const profileSnap = await getDoc(profileRef);
@@ -116,13 +113,16 @@
                 userProfile = profileSnap.data();
                 console.log("Profile loaded:", userProfile);
             } else {
+                // Determine a stable default name using the last 4 digits of UID
+                const shortUid = uid.substring(uid.length - 4);
                 userProfile = {
-                    name: `User ${uid.substring(0, 4)}`,
+                    name: `User ${shortUid}`,
                     role: 'Employee',
                     managerId: 'admin-manager-default', 
                     uid: uid
                 };
-                await setDoc(profileRef, userProfile);
+                // Set the default profile (non-blocking)
+                setDoc(profileRef, userProfile).catch(e => console.error("Error setting default profile:", e));
                 console.log("Default profile created:", userProfile);
             }
             
@@ -138,15 +138,14 @@
 
         // --- Firestore Real-time Listener (New Logic) ---
         window.startExpenseListener = () => {
-            // FIX: Ensure dbInstance is available before attempting to get the collection
             if (!dbInstance) {
                 console.error("Firestore database instance not ready yet.");
-                // Retry listener setup after a short delay if needed, or rely on setupApplication
                 return;
             }
 
             const expensesRef = collection(dbInstance, EXPENSES_COLLECTION);
             
+            // FIX: Using onSnapshot for real-time updates
             onSnapshot(expensesRef, (snapshot) => {
                 window.allExpenses = snapshot.docs.map(doc => ({
                     id: doc.id,
@@ -154,10 +153,15 @@
                 }));
                 
                 console.log(`Fetched ${window.allExpenses.length} expenses in real-time.`);
+                
+                // Immediately calculate base amounts and update UI
                 window.calculateBaseAmounts(); 
+                
             }, (error) => {
                 console.error("Error fetching real-time expenses:", error);
                 window.showModal('Error', 'Failed to subscribe to real-time expense data.');
+                
+                // If there's an error, still show the UI
                 const spinner = document.getElementById('loading-spinner');
                 spinner.classList.add('hidden');
                 spinner.classList.remove('flex', 'items-center', 'justify-center');
@@ -166,53 +170,16 @@
         };
 
 
-        // --- Legacy Setup Mapping and Exports (Moved after successful auth) ---
-        const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-
+        // --- Global Setup Mappings ---
         window.companyBaseCurrency = 'USD';
         window.allExpenses = [];
-        window.exchangeRates = {};
         window.demoUsers = {}; 
 
-        window.fetchExchangeRate = async (fromCurrency, toCurrency, maxRetries = 5) => {
-            if (fromCurrency === toCurrency) return 1.0;
-            const apiUrl = `https://api.exchangerate-api.com/v4/latest/${fromCurrency}`;
-
-            for (let attempt = 0; attempt < maxRetries; attempt++) {
-                try {
-                    const response = await fetch(apiUrl);
-                    if (!response.ok) {
-                        if (response.status === 429 && attempt < maxRetries - 1) {
-                            throw new Error(`Rate limit hit or temporary API error (Status: ${response.status}). Retrying...`);
-                        }
-                        throw new Error(`API returned non-OK status: ${response.status}`);
-                    }
-
-                    const data = await response.json();
-                    if (data.rates && data.rates[toCurrency]) {
-                        return data.rates[toCurrency];
-                    } else {
-                        throw new Error(`Could not find rate for ${toCurrency} in the API response.`);
-                    }
-
-                } catch (error) {
-                    console.error(`Attempt ${attempt + 1} failed:`, error.message);
-                    if (attempt < maxRetries - 1) {
-                        const waitTime = Math.pow(2, attempt) * 1000 + (Math.random() * 1000); 
-                        console.log(`Waiting ${Math.round(waitTime / 1000)}s before retrying...`);
-                        await delay(waitTime);
-                    } else {
-                        console.error(`Maximum retries reached for ${fromCurrency} to ${toCurrency}. Falling back to 1.0.`);
-                        return 1.0; 
-                    }
-                }
-            }
-            return 1.0; 
-        };
-
-        // Initial setup for the app's internal functions
+        // REMOVED: The problematic fetchExchangeRate function and reliance on an external API.
+        
+        // --- Initial setup function called on window load ---
         window.addEventListener('load', () => {
-             // Only run initApp if the user is in a Canvas environment (where the globals are defined)
+             // Only run initApp if we have a Firebase context or config
              if (typeof __firebase_config !== 'undefined' || Object.keys(firebaseConfig).length > 0) {
                 window.initApp();
              } else {
@@ -388,7 +355,7 @@
 
                     <div id="manager" class="tab-pane hidden">
                         <h2 class="text-2xl font-semibold mb-4 text-odoo-green">Expenses Awaiting My Approval</h2>
-                        <p class="text-sm text-gray-600 mb-4">All amounts are displayed in the company's base currency: **USD**.</p>
+                        <p class="text-sm text-gray-600 mb-4">All amounts are displayed in the company's base currency: **USD**. (Note: Rates are currently fixed at 1:1 for reliable submission.)</p>
                         <div class="bg-white p-4 md:p-6 rounded-xl shadow-md overflow-x-auto custom-scroll">
                             <table class="min-w-full divide-y divide-gray-200">
                                 <thead class="bg-gray-50">
@@ -468,7 +435,6 @@
             currentUserId = window.getUserId(); 
             userProfile = window.demoUsers[currentUserId]; 
             
-            // FIX: If userProfile is null (race condition), stop and wait for auth listener to finish
             if (!userProfile) {
                 console.warn("User profile not ready during UI update, skipping.");
                 return;
@@ -512,38 +478,18 @@
             }
         };
 
-        // --- Currency Conversion ---
+        // --- Currency Conversion (MOCKED FOR STABILITY) ---
 
         /**
-         * Calculates and sets the base_amount for all expenses using the API.
+         * Calculates and sets the base_amount for all expenses using a fixed rate (1.0).
          */
-        window.calculateBaseAmounts = async () => {
+        window.calculateBaseAmounts = () => {
             const baseCurrency = window.companyBaseCurrency;
 
-            // 1. Identify all unique foreign currencies needed
-            const currenciesToFetch = new Set(window.allExpenses
-                .filter(e => e.original_currency !== baseCurrency)
-                .map(e => e.original_currency)
-            );
-
-            // 2. Fetch rates for each unique foreign currency
-            const fetchPromises = Array.from(currenciesToFetch).map(async (from) => {
-                if (!window.exchangeRates[from]) {
-                    const rate = await window.fetchExchangeRate(from, baseCurrency);
-                    window.exchangeRates[from] = rate;
-                }
-            });
-
-            await Promise.all(fetchPromises);
-
-            // 3. Update all expenses with calculated base_amount (locally only for display)
+            // 1. Update all expenses with calculated base_amount (fixed at 1:1 conversion for stability)
             window.allExpenses = window.allExpenses.map(expense => {
-                if (expense.original_currency === baseCurrency) {
-                    expense.base_amount = expense.original_amount;
-                } else {
-                    const rate = window.exchangeRates[expense.original_currency] || 1.0;
-                    expense.base_amount = Math.round(expense.original_amount * rate * 100) / 100;
-                }
+                // Rate is always 1.0 (USD = 1 USD, EUR = 1 USD, etc.) to prevent API dependency block
+                expense.base_amount = expense.original_amount; 
                 return expense;
             });
 
@@ -642,12 +588,12 @@
             lucide.createIcons();
         };
 
-        // --- Data Write Handlers (Updated to use Firestore) ---
+        // --- Data Write Handlers ---
 
         window.submitExpense = async (event) => {
             event.preventDefault();
 
-            // FIX: Check if Firebase DB is initialized and ready
+            // Check if Firebase DB is initialized and ready
             if (!window.db || !window.isAuthReady()) {
                 window.showModal('Initialization Error', 'Application is still connecting to the database. Please wait a moment and try again.');
                 return;
@@ -663,14 +609,12 @@
 
             const original_currency = document.getElementById('exp-currency').value;
             const original_amount = parseFloat(document.getElementById('exp-amount').value);
-            const baseCurrency = window.companyBaseCurrency;
-
+            
             try {
-                // 1. Calculate the base amount using the API
-                const rate = await window.fetchExchangeRate(original_currency, baseCurrency);
-                const base_amount = Math.round(original_amount * rate * 100) / 100;
+                // MOCK: Base amount is set to original amount (1:1 conversion) to avoid API dependency
+                const base_amount = original_amount; 
 
-                // 2. Construct the new expense object
+                // Construct the new expense object
                 const newExpenseData = {
                     userId: currentUserId,
                     userName: userProfile.name,
@@ -685,17 +629,16 @@
                     submitted_on: new Date().toISOString()
                 };
 
-                // 3. Write to Firestore (using globally exposed functions)
+                // Write to Firestore
                 const expensesCollectionRef = window.collection(window.db, window.EXPENSES_COLLECTION);
                 await window.addDoc(expensesCollectionRef, newExpenseData);
                 
-                // 4. Update UI and provide feedback
+                // Update UI and provide feedback
                 document.getElementById('expense-form').reset();
                 window.showModal('Success!', `Expense claim submitted successfully for approval. Value: $${base_amount.toFixed(2)} USD.`);
             } catch (e) {
                 console.error("Error submitting expense:", e);
-                // The main error you saw previously is handled here with a generic message.
-                window.showModal('Submission Failed', `An error occurred: ${e.message}. Expected a FirebaseFirestore instance.`);
+                window.showModal('Submission Failed', `An error occurred: ${e.message}. Please check console for network errors.`);
             } finally {
                 submitText.textContent = 'Submit Claim';
                 submitSpinner.classList.add('hidden');
@@ -704,7 +647,6 @@
         };
 
         window.handleApproval = async (expenseId, newStatus, event) => {
-             // FIX: Check if Firebase DB is initialized and ready
             if (!window.db || !window.isAuthReady()) {
                 window.showModal('Initialization Error', 'Application is still connecting to the database. Please wait a moment and try again.');
                 return;
@@ -715,7 +657,7 @@
              approvalBtn.textContent = '...';
 
             try {
-                // Get reference to the specific document (using globally exposed functions)
+                // Get reference to the specific document
                 const expenseDocRef = window.doc(window.db, window.EXPENSES_COLLECTION, expenseId);
                 
                 // Update the document status in Firestore
@@ -730,6 +672,7 @@
                 console.error(`Error ${newStatus}ing expense:`, e);
                 window.showModal('Action Failed', `Failed to update expense status: ${e.message}`);
             } finally {
+                 // The onSnapshot listener handles refreshing the UI, so we just re-enable buttons.
                  approvalBtn.disabled = false;
                  approvalBtn.textContent = newStatus;
             }
@@ -742,10 +685,7 @@
          * Main setup function called after Firebase auth is ready and profile is loaded
          */
         window.setupApplication = async () => {
-             currentUserId = window.getUserId();
-             userProfile = window.demoUsers[currentUserId]; 
-             
-             // Start the real-time listener.
+             // Start the real-time listener, which handles the final UI rendering.
              window.startExpenseListener();
         };
 
