@@ -1,4 +1,4 @@
-// server.js (UPDATED for User Management)
+// server.js (UPDATED FOR SQLITE)
 
 const express = require('express');
 const cors = require('cors'); 
@@ -8,68 +8,16 @@ const PORT = 3000;
 
 // --- DATABASE CONNECTION ---
 const db = new Database('expenses.db'); 
+// You should have run init_db.js before starting the server!
 // ---------------------------
 
 const USD_RATE_MOCK = { 'USD': 1.00, 'EUR': 1.08, 'GBP': 1.25 };
 const MANAGED_EMPLOYEES = {
-    4: [2, 3] // Manager ID 4 manages users 2 and 3 (hardcoded for simplicity)
+    4: [2, 3] 
 };
 
 app.use(express.json()); 
 app.use(cors());         
-
-// --- NEW USER MANAGEMENT ENDPOINTS ---
-
-// GET /api/users - Get all users (for role selection and management)
-app.get('/api/users', (req, res) => {
-    const users = db.prepare('SELECT userId, employeeName, role FROM users').all();
-    res.json(users);
-});
-
-// POST /api/users - Create a new user
-app.post('/api/users', (req, res) => {
-    const { employeeName, role } = req.body;
-
-    if (!employeeName || !role) {
-        return res.status(400).json({ message: 'Missing employeeName or role' });
-    }
-
-    const stmt = db.prepare('INSERT INTO users (employeeName, role) VALUES (?, ?)');
-    try {
-        const info = stmt.run(employeeName, role);
-        const newUser = db.prepare('SELECT userId, employeeName, role FROM users WHERE userId = ?').get(info.lastInsertRowid);
-        res.status(201).json(newUser);
-    } catch (error) {
-        if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') {
-            return res.status(409).json({ message: 'User with this name already exists' });
-        }
-        console.error(error);
-        res.status(500).json({ message: 'Database error on user creation' });
-    }
-});
-
-// DELETE /api/users/:userId - Delete a user
-app.delete('/api/users/:userId', (req, res) => {
-    const userId = parseInt(req.params.userId);
-
-    // 1. Check for open claims (Prevents deleting users with active expenses)
-    const hasClaims = db.prepare('SELECT 1 FROM expenses WHERE userId = ?').get(userId);
-    if (hasClaims) {
-        return res.status(403).json({ message: 'Cannot delete user: They have existing expense claims.' });
-    }
-    
-    // 2. Delete user
-    const stmt = db.prepare('DELETE FROM users WHERE userId = ?');
-    const result = stmt.run(userId);
-
-    if (result.changes === 0) {
-        return res.status(404).json({ message: 'User not found' });
-    }
-
-    res.json({ message: 'User deleted successfully', userId });
-});
-
-// --- EXPENSE ENDPOINTS (unchanged, but relying on database) ---
 
 // 1. GET /api/expenses/myclaims - Employee View
 app.get('/api/expenses/myclaims', (req, res) => {
@@ -84,6 +32,7 @@ app.get('/api/expenses/pending', (req, res) => {
     const managerId = parseInt(req.query.managerId);
     const teamIds = MANAGED_EMPLOYEES[managerId] || [];
 
+    // SQL query to fetch pending expenses for the manager's team
     const placeholders = teamIds.map(() => '?').join(', ');
     if (teamIds.length === 0) {
         return res.json([]);
@@ -100,17 +49,18 @@ app.get('/api/expenses/pending', (req, res) => {
 
 // 3. POST /api/expenses - Submit New Claim
 app.post('/api/expenses', (req, res) => {
-    const newDocId = 'e-' + Date.now(); 
+    const newDocId = 'e-' + Date.now(); // Real unique ID
     const { userId, employeeName, date, description, category, amount, currency } = req.body;
 
     const usdEquivalent = amount * (USD_RATE_MOCK[currency] || 1);
     const status = 'Pending';
 
     const stmt = db.prepare(`
-        INSERT INTO expenses (docId, userId, employeeName, date, description, category, amount, currency, status, usdEquivalent)
-        VALUES (@newDocId, @userId, @employeeName, @date, @description, @category, @amount, @currency, @status, @usdEquivalent)
+        INSERT INTO expenses VALUES (
+            @docId, @userId, @employeeName, @date, @description, @category, @amount, @currency, @status, @usdEquivalent
+        )
     `);
-    
+
     try {
         stmt.run({ newDocId, userId, employeeName, date, description, category, amount, currency, status, usdEquivalent });
         const newExpense = db.prepare('SELECT * FROM expenses WHERE docId = ?').get(newDocId);
@@ -137,8 +87,8 @@ app.patch('/api/expenses/:docId', (req, res) => {
     res.json({ message: 'Status updated successfully', expense: updatedExpense });
 });
 
-
 // 5. Start Server
 app.listen(PORT, () => {
-    console.log(`🚀 USER MANAGEMENT API Server is running on http://localhost:${PORT}`);
+    console.log(`🚀 SQLITE API Server is running on http://localhost:${PORT}`);
+    console.log(`Your data is now persistent in expenses.db!`);
 });
