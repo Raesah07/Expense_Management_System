@@ -4,495 +4,713 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Expense Management System</title>
+    <!-- Load Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <!-- Chosen Palette: Calm Harmony (Warm neutrals: bg-stone-100, bg-white; Accent: bg-indigo-600) -->
-    <!-- 
-        Application Structure Plan: The application is structured as a role-based Single-Page Application (SPA) to directly mirror the user roles (Admin, Manager, Employee) defined in the problem statement. This task-oriented design is the most intuitive way for a user (or judge) to understand the system's functionality from each perspective. 
-    -->
+    <!-- Inter Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Load Firebase Modules -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, query, where, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global variables provided by the Canvas environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let db, auth;
+        let userId = null;
+        let userRole = 'Employee'; // Default role
+        let isAuthReady = false;
+        let userManagerId = 'manager-1'; // Static manager for demo purposes
+
+        // App initialization function
+        window.initApp = async () => {
+            try {
+                // 1. Initialize Firebase
+                if (Object.keys(firebaseConfig).length === 0) {
+                     console.warn("Firebase config is missing. Using static demo data only.");
+                } else {
+                    const app = initializeApp(firebaseConfig);
+                    db = getFirestore(app);
+                    auth = getAuth(app);
+                    
+                    // 2. Authentication
+                    if (initialAuthToken) {
+                        await signInWithCustomToken(auth, initialAuthToken);
+                        console.log("Signed in with custom token.");
+                    } else {
+                        await signInAnonymously(auth);
+                        console.log("Signed in anonymously.");
+                    }
+                    
+                    // 3. Auth State Listener
+                    onAuthStateChanged(auth, (user) => {
+                        if (user) {
+                            userId = user.uid;
+                        } else {
+                             // Fallback for anonymous users
+                            userId = crypto.randomUUID(); 
+                        }
+                        console.log(`User ID: ${userId}`);
+                        isAuthReady = true;
+                        // Start the application setup only after auth is ready
+                        setupApplication();
+                    });
+                }
+
+                // If no Firebase config, proceed immediately with static demo data
+                if (Object.keys(firebaseConfig).length === 0) {
+                    isAuthReady = true;
+                    setupApplication();
+                }
+
+            } catch (error) {
+                console.error("Firebase Initialization or Auth Error:", error);
+                // Fallback to static data if Firebase fails
+                isAuthReady = true;
+                setupApplication();
+            }
+        };
+
+        // Delay utility for exponential backoff
+        const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+        /**
+         * Fetches exchange rate from BASE_CURRENCY to TARGET_CURRENCY with exponential backoff.
+         * @param {string} fromCurrency - The base currency (e.g., 'USD').
+         * @param {string} toCurrency - The target currency (e.g., 'EUR').
+         * @returns {Promise<number>} - The exchange rate.
+         */
+        window.fetchExchangeRate = async (fromCurrency, toCurrency, maxRetries = 5) => {
+            if (fromCurrency === toCurrency) return 1.0;
+            const apiUrl = `https://api.exchangerate-api.com/v4/latest/${fromCurrency}`;
+
+            for (let attempt = 0; attempt < maxRetries; attempt++) {
+                try {
+                    const response = await fetch(apiUrl);
+                    if (!response.ok) {
+                        // Check for rate limiting or other recoverable errors
+                        if (response.status === 429 && attempt < maxRetries - 1) {
+                            throw new Error(`Rate limit hit or temporary API error (Status: ${response.status}). Retrying...`);
+                        }
+                        throw new Error(`API returned non-OK status: ${response.status}`);
+                    }
+
+                    const data = await response.json();
+                    if (data.rates && data.rates[toCurrency]) {
+                        // Return the rate for the target currency
+                        return data.rates[toCurrency];
+                    } else {
+                        throw new Error(`Could not find rate for ${toCurrency} in the API response.`);
+                    }
+
+                } catch (error) {
+                    console.error(`Attempt ${attempt + 1} failed:`, error.message);
+                    if (attempt < maxRetries - 1) {
+                        const waitTime = Math.pow(2, attempt) * 1000 + (Math.random() * 1000); // 1s, 2s, 4s, 8s, ...
+                        console.log(`Waiting ${Math.round(waitTime / 1000)}s before retrying...`);
+                        await delay(waitTime);
+                    } else {
+                        console.error(`Maximum retries reached for ${fromCurrency} to ${toCurrency}. Falling back to 1.0.`);
+                        return 1.0; // Fallback to 1.0 to prevent app crash
+                    }
+                }
+            }
+            return 1.0; // Should not be reached, but safe fallback
+        };
+
+        // Global functions and data available to the rest of the script
+        window.db = db;
+        window.auth = auth;
+        window.getUserId = () => userId;
+        window.getUserRole = () => userRole;
+        window.isAuthReady = () => isAuthReady;
+        window.userManagerId = userManagerId;
+
+        window.companyBaseCurrency = 'USD'; // Static for demo
+
+        // Initial demo data (will be replaced by Firestore later)
+        window.staticExpenses = [
+            { id: 'exp-001', userId: 'user-2', userName: 'Jane Smith', date: '2025-09-01', description: 'Client lunch meeting', category: 'Meals', original_amount: 55.00, original_currency: 'EUR', base_amount: 0, status: 'Pending', approverId: 'manager-1' },
+            { id: 'exp-002', userId: 'user-2', userName: 'Jane Smith', date: '2025-09-03', description: 'Train ticket to Berlin', category: 'Travel', original_amount: 150.00, original_currency: 'EUR', base_amount: 0, status: 'Approved', approverId: 'manager-1' },
+            { id: 'exp-003', userId: 'user-3', userName: 'John Doe', date: '2025-09-05', description: 'Google Workspace Subscription', category: 'Software', original_amount: 120.00, original_currency: 'USD', base_amount: 0, status: 'Draft', approverId: 'manager-1' },
+            { id: 'exp-004', userId: 'user-3', userName: 'John Doe', date: '2025-09-07', description: 'Hotel stay for conference', category: 'Travel', original_amount: 550.00, original_currency: 'GBP', base_amount: 0, status: 'Pending', approverId: 'manager-1' },
+            { id: 'exp-005', userId: 'user-4', userName: 'Raesah Shaik', date: '2025-09-10', description: 'Taxi to Airport', category: 'Travel', original_amount: 45.00, original_currency: 'USD', base_amount: 0, status: 'Pending', approverId: 'manager-1' },
+            { id: 'exp-006', userId: 'user-4', userName: 'Raesah Shaik', date: '2025-09-12', description: 'Office Supplies', category: 'Supplies', original_amount: 25.00, original_currency: 'USD', base_amount: 0, status: 'Approved', approverId: 'manager-1' },
+        ];
+
+        // Static user mapping for demo
+        window.demoUsers = {
+            'user-1': { name: 'Admin User', role: 'Admin', managerId: null },
+            'manager-1': { name: 'Alice Johnson', role: 'Manager', managerId: 'user-1' }, // User ID 'manager-1' is manager for all demo users
+            'user-2': { name: 'Jane Smith', role: 'Employee', managerId: 'manager-1' },
+            'user-3': { name: 'John Doe', role: 'Employee', managerId: 'manager-1' },
+            'user-4': { name: 'Raesah Shaik', role: 'Employee', managerId: 'manager-1' } // This user will be selected by default
+        };
+        
+    </script>
     <style>
-        body { font-family: 'Inter', sans-serif; }
-        .chart-container { position: relative; width: 100%; max-width: 600px; margin-left: auto; margin-right: auto; height: 300px; max-height: 400px; }
-        @media (min-width: 768px) { .chart-container { height: 350px; } }
-        .view { display: none; }
-        .view.active { display: block; }
-        .flow-step {
-            border: 2px dashed #cbd5e1;
-            padding: 1rem;
-            border-radius: 0.5rem;
-            background-color: #f8fafc;
+        :root {
+            --primary-color: #008a00; /* Odoo Green */
+            --secondary-color: #00b466; 
+            --text-color: #333;
         }
-        .flow-connector {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            height: 4rem;
-            width: 2px;
-            background-color: #94a3b8;
-            margin: 0 auto;
+        body {
+            font-family: 'Inter', sans-serif;
+            color: var(--text-color);
+            background-color: #f8f9fa;
         }
-         .flow-connector::after {
-            content: '▼';
-            color: #94a3b8;
-            position: absolute;
-            margin-top: 4.5rem;
+        .header-bg {
+            background-color: var(--primary-color);
+        }
+        .text-odoo-green {
+            color: var(--primary-color);
+        }
+        .bg-odoo-green {
+            background-color: var(--primary-color);
+        }
+        .btn-primary {
+            background-color: var(--primary-color);
+            transition: background-color 0.2s;
+        }
+        .btn-primary:hover {
+            background-color: #007700;
+        }
+        .status-pill {
+            padding: 4px 8px;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .status-Pending {
+            background-color: #ffedd5;
+            color: #9a3412;
+        }
+        .status-Approved {
+            background-color: #d1fae5;
+            color: #065f46;
+        }
+        .status-Rejected {
+            background-color: #fee2e2;
+            color: #991b1b;
+        }
+        .status-Draft {
+            background-color: #e0f2fe;
+            color: #0c4a6e;
+        }
+        /* Custom scrollbar for tables */
+        .custom-scroll::-webkit-scrollbar {
+            height: 6px;
+        }
+        .custom-scroll::-webkit-scrollbar-thumb {
+            background-color: rgba(0, 0, 0, 0.2);
+            border-radius: 10px;
         }
     </style>
 </head>
-<body class="bg-stone-100 text-stone-800">
+<body onload="initApp()">
 
-    <div id="app" class="min-h-screen">
-        <header class="bg-white shadow-sm sticky top-0 z-10">
-            <nav class="container mx-auto px-4 sm:px-6 lg:px-8">
-                <div class="flex items-center justify-between h-16">
-                    <div class="flex items-center">
-                        <span class="font-bold text-xl text-indigo-600">Odoo ExpensePro</span>
-                    </div>
-                    <div class="flex items-center space-x-4">
-                        <span class="font-medium">Simulate Role:</span>
-                        <button onclick="switchView('employee')" class="nav-btn px-3 py-2 rounded-md text-sm font-medium text-stone-600 hover:bg-stone-200" data-role="employee">Employee</button>
-                        <button onclick="switchView('manager')" class="nav-btn px-3 py-2 rounded-md text-sm font-medium text-stone-600 hover:bg-stone-200" data-role="manager">Manager</button>
-                        <button onclick="switchView('admin')" class="nav-btn px-3 py-2 rounded-md text-sm font-medium text-stone-600 hover:bg-stone-200" data-role="admin">Admin</button>
+    <div id="app" class="min-h-screen flex flex-col">
+        <!-- Header -->
+        <header class="header-bg text-white shadow-lg p-4 md:p-6 flex justify-between items-center">
+            <h1 class="text-xl md:text-2xl font-bold">Odoo Expense Manager</h1>
+            <div class="flex items-center space-x-4">
+                <div id="user-info" class="text-sm md:text-base font-medium">Loading User...</div>
+                <div class="relative">
+                    <select id="user-selector" onchange="window.switchUser(this.value)" class="p-2 pr-10 rounded-lg text-sm md:text-base bg-white text-gray-800 appearance-none cursor-pointer">
+                        <!-- Options populated by JS -->
+                    </select>
+                    <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-700">
+                        <svg class="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
                     </div>
                 </div>
-            </nav>
+            </div>
         </header>
 
-        <main class="container mx-auto p-4 sm:p-6 lg:p-8">
-            
-            <!-- Role Selector (Initial View) -->
-            <div id="role-selector" class="view active">
-                 <div class="text-center">
-                    <h1 class="text-3xl font-bold tracking-tight text-stone-900 sm:text-4xl">Welcome to the Expense Management System</h1>
-                    <p class="mt-4 text-lg text-stone-600">Please select a role below to explore the application's features from a specific user's perspective.</p>
-                </div>
-                <div class="mt-12 grid grid-cols-1 md:grid-cols-3 gap-8">
-                    <div onclick="switchView('employee')" class="cursor-pointer bg-white p-8 rounded-lg shadow-md hover:shadow-xl transition-shadow text-center">
-                        <div class="text-5xl mb-4">🧑‍💼</div>
-                        <h2 class="text-2xl font-bold text-indigo-600">Employee</h2>
-                        <p class="mt-2 text-stone-500">Submit new expense claims and track the status of your past submissions.</p>
-                    </div>
-                    <div onclick="switchView('manager')" class="cursor-pointer bg-white p-8 rounded-lg shadow-md hover:shadow-xl transition-shadow text-center">
-                        <div class="text-5xl mb-4">👨‍⚖️</div>
-                        <h2 class="text-2xl font-bold text-indigo-600">Manager</h2>
-                        <p class="mt-2 text-stone-500">Review, approve, or reject expense claims submitted by your team members.</p>
-                    </div>
-                    <div onclick="switchView('admin')" class="cursor-pointer bg-white p-8 rounded-lg shadow-md hover:shadow-xl transition-shadow text-center">
-                        <div class="text-5xl mb-4">⚙️</div>
-                        <h2 class="text-2xl font-bold text-indigo-600">Admin</h2>
-                        <p class="mt-2 text-stone-500">Manage users, configure approval workflows, and oversee all company expenses.</p>
-                    </div>
-                </div>
+        <!-- Main Content Area -->
+        <main class="flex-grow p-4 md:p-8">
+            <div id="loading-spinner" class="text-center py-12 hidden">
+                <svg class="animate-spin h-8 w-8 text-odoo-green mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <p class="mt-2 text-gray-600">Loading application data...</p>
             </div>
 
-            <!-- Employee View -->
-            <div id="employee-view" class="view">
-                <h1 class="text-2xl font-bold mb-6">Employee Dashboard</h1>
-                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    <div class="lg:col-span-2 bg-white p-6 rounded-lg shadow-md">
-                        <div class="flex justify-between items-center mb-4">
-                            <h2 class="text-xl font-semibold">My Expense History</h2>
-                             <button onclick="openModal('expense-modal')" class="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 transition">Submit New Expense</button>
-                        </div>
-                        <table class="w-full text-left">
-                            <thead>
-                                <tr class="border-b">
-                                    <th class="py-2">Date</th>
-                                    <th class="py-2">Description</th>
-                                    <th class="py-2">Category</th>
-                                    <th class="py-2 text-right">Amount</th>
-                                    <th class="py-2 text-center">Status</th>
-                                </tr>
-                            </thead>
-                            <tbody id="employee-expense-table">
-                                <!-- JS will populate this -->
-                            </tbody>
-                        </table>
-                    </div>
-                    <div class="bg-white p-6 rounded-lg shadow-md">
-                        <h2 class="text-xl font-semibold mb-4">My Stats</h2>
-                        <div class="space-y-4">
-                            <div>
-                                <p class="font-medium">Total Submitted</p>
-                                <p class="text-2xl font-bold text-indigo-600">5</p>
-                            </div>
-                            <div>
-                                <p class="font-medium">Total Approved</p>
-                                <p class="text-2xl font-bold text-green-600">$ 1,250.00</p>
-                            </div>
-                            <div>
-                                <p class="font-medium">Pending Review</p>
-                                <p class="text-2xl font-bold text-amber-600">1</p>
-                            </div>
-                        </div>
-                    </div>
+            <div id="content-area" class="space-y-10 hidden">
+                <!-- Tabs for main navigation -->
+                <div class="flex border-b border-gray-200">
+                    <button class="tab-button px-4 py-2 text-sm md:text-base font-medium border-b-2 border-transparent transition duration-150 ease-in-out" data-tab="dashboard">Dashboard</button>
+                    <button class="tab-button px-4 py-2 text-sm md:text-base font-medium border-b-2 border-transparent transition duration-150 ease-in-out" data-tab="submission">Submit Expense</button>
+                    <button class="tab-button px-4 py-2 text-sm md:text-base font-medium border-b-2 border-transparent transition duration-150 ease-in-out" data-tab="manager" id="manager-tab" style="display:none;">Approvals</button>
+                    <button class="tab-button px-4 py-2 text-sm md:text-base font-medium border-b-2 border-transparent transition duration-150 ease-in-out" data-tab="admin" id="admin-tab" style="display:none;">Admin Config</button>
                 </div>
-            </div>
 
-            <!-- Manager View -->
-            <div id="manager-view" class="view">
-                <h1 class="text-2xl font-bold mb-6">Manager Dashboard</h1>
-                 <div class="bg-white p-6 rounded-lg shadow-md mb-6">
-                    <h2 class="text-xl font-semibold mb-4">Awaiting My Approval</h2>
-                    <table class="w-full text-left">
-                        <thead>
-                            <tr class="border-b">
-                                <th class="py-2">Employee</th>
-                                <th class="py-2">Date</th>
-                                <th class="py-2">Description</th>
-                                <th class="py-2 text-right">Amount (USD)</th>
-                                <th class="py-2 text-center">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody id="manager-approval-table">
-                            <!-- JS will populate this -->
-                        </tbody>
-                    </table>
-                </div>
-                 <div class="bg-white p-6 rounded-lg shadow-md">
-                    <h2 class="text-xl font-semibold mb-4">My Team's Expense History</h2>
-                    <table class="w-full text-left">
-                        <thead>
-                            <tr class="border-b">
-                                <th class="py-2">Employee</th>
-                                <th class="py-2">Date</th>
-                                <th class="py-2">Description</th>
-                                <th class="py-2 text-right">Amount</th>
-                                <th class="py-2 text-center">Status</th>
-                            </tr>
-                        </thead>
-                        <tbody id="manager-team-table">
-                            <!-- JS will populate this -->
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            <!-- Admin View -->
-            <div id="admin-view" class="view">
-                 <h1 class="text-2xl font-bold mb-6">Admin Dashboard</h1>
-                 <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
-                     <div class="xl:col-span-2 space-y-6">
-                        <div class="bg-white p-6 rounded-lg shadow-md">
-                           <h2 class="text-xl font-semibold mb-4">Approval Flow Configuration</h2>
-                           <p class="text-stone-600 mb-4">Visually construct the approval process for expenses. Add steps and define rules for how claims are routed and approved. This interactive builder demonstrates the system's core logic for multi-level and conditional approvals.</p>
-                           <div id="flow-builder" class="space-y-2">
-                               <!-- JS generates flow steps here -->
-                           </div>
-                           <button onclick="addFlowStep()" class="mt-4 bg-indigo-100 text-indigo-700 px-4 py-2 rounded-md hover:bg-indigo-200 transition">+ Add Step</button>
-                        </div>
-                         <div class="bg-white p-6 rounded-lg shadow-md">
-                            <h2 class="text-xl font-semibold mb-4">User Management</h2>
-                            <table class="w-full text-left">
-                                <thead>
-                                    <tr class="border-b">
-                                        <th class="py-2">Name</th>
-                                        <th class="py-2">Email</th>
-                                        <th class="py-2">Role</th>
-                                        <th class="py-2">Manager</th>
+                <!-- Tab Content -->
+                <div id="tab-content" class="space-y-6">
+                    <div id="dashboard" class="tab-pane">
+                        <h2 class="text-2xl font-semibold mb-4 text-odoo-green">My Expense History</h2>
+                        <div class="bg-white p-4 md:p-6 rounded-xl shadow-md overflow-x-auto">
+                            <table class="min-w-full divide-y divide-gray-200">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                                        <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
+                                        <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
+                                        <th class="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+                                        <th class="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                                     </tr>
                                 </thead>
-                                <tbody id="user-management-table">
-                                   <!-- JS will populate this -->
+                                <tbody id="employee-expense-list" class="bg-white divide-y divide-gray-200">
+                                    <!-- Employee expense rows go here -->
                                 </tbody>
                             </table>
                         </div>
-                     </div>
-                     <div class="space-y-6">
-                        <div class="bg-white p-6 rounded-lg shadow-md">
-                           <h2 class="text-xl font-semibold mb-4">Expense Status Breakdown</h2>
-                           <div class="chart-container">
-                               <canvas id="statusChart"></canvas>
-                           </div>
-                       </div>
-                        <div class="bg-white p-6 rounded-lg shadow-md">
-                           <h2 class="text-xl font-semibold mb-4">Expenses by Category</h2>
-                           <div class="chart-container" style="height: 250px;">
-                               <canvas id="categoryChart"></canvas>
-                           </div>
-                       </div>
-                     </div>
-                 </div>
-            </div>
+                    </div>
 
-        </main>
-    </div>
-
-    <!-- Modals -->
-    <div id="expense-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-20">
-        <div class="bg-white rounded-lg shadow-xl p-8 w-full max-w-md">
-            <h2 class="text-2xl font-bold mb-4">Submit New Expense</h2>
-            <form id="expense-form">
-                 <div class="space-y-4">
-                     <div>
-                        <label for="amount" class="block text-sm font-medium text-stone-700">Amount</label>
-                        <div class="mt-1 flex rounded-md shadow-sm">
-                             <input type="number" name="amount" id="amount" class="flex-1 block w-full rounded-none rounded-l-md border-stone-300 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" placeholder="100.00" required>
-                             <input type="text" name="currency" id="currency" class="block w-20 rounded-r-md border-stone-300 bg-stone-50 text-stone-500 sm:text-sm" placeholder="USD" value="EUR" required>
+                    <div id="submission" class="tab-pane hidden">
+                        <h2 class="text-2xl font-semibold mb-6 text-odoo-green">Submit New Expense Claim</h2>
+                        <div class="max-w-xl bg-white p-6 md:p-8 rounded-xl shadow-md">
+                            <form id="expense-form" onsubmit="window.submitExpense(event)">
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div>
+                                        <label for="exp-date" class="block text-sm font-medium text-gray-700 mb-1">Date</label>
+                                        <input type="date" id="exp-date" required class="w-full p-2 border border-gray-300 rounded-lg focus:ring-odoo-green focus:border-odoo-green">
+                                    </div>
+                                    <div>
+                                        <label for="exp-category" class="block text-sm font-medium text-gray-700 mb-1">Category</label>
+                                        <select id="exp-category" required class="w-full p-2 border border-gray-300 rounded-lg focus:ring-odoo-green focus:border-odoo-green">
+                                            <option value="">Select Category</option>
+                                            <option value="Meals">Meals</option>
+                                            <option value="Travel">Travel</option>
+                                            <option value="Accommodation">Accommodation</option>
+                                            <option value="Software">Software/Subscriptions</option>
+                                            <option value="Other">Other</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-span-1 md:col-span-2">
+                                        <label for="exp-description" class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                                        <textarea id="exp-description" rows="3" required class="w-full p-2 border border-gray-300 rounded-lg focus:ring-odoo-green focus:border-odoo-green"></textarea>
+                                    </div>
+                                    <div class="col-span-1 md:col-span-2 flex space-x-4">
+                                        <div class="flex-1">
+                                            <label for="exp-amount" class="block text-sm font-medium text-gray-700 mb-1">Amount</label>
+                                            <input type="number" id="exp-amount" step="0.01" required class="w-full p-2 border border-gray-300 rounded-lg focus:ring-odoo-green focus:border-odoo-green">
+                                        </div>
+                                        <div class="w-24">
+                                            <label for="exp-currency" class="block text-sm font-medium text-gray-700 mb-1">Currency</label>
+                                            <select id="exp-currency" required class="w-full p-2 border border-gray-300 rounded-lg focus:ring-odoo-green focus:border-odoo-green">
+                                                <option value="USD">USD</option>
+                                                <option value="EUR">EUR</option>
+                                                <option value="GBP">GBP</option>
+                                                <option value="INR">INR</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <button type="submit" class="btn-primary text-white font-semibold py-2 px-4 rounded-lg mt-8 w-full shadow-md hover:shadow-lg flex items-center justify-center" id="submit-button">
+                                    <span id="submit-text">Submit Claim</span>
+                                    <span id="submit-spinner" class="hidden animate-spin h-5 w-5 ml-2 border-t-2 border-r-2 border-white rounded-full"></span>
+                                </button>
+                            </form>
                         </div>
                     </div>
-                     <div>
-                        <label for="category" class="block text-sm font-medium text-stone-700">Category</label>
-                        <select id="category" name="category" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md" required>
-                            <option>Travel</option>
-                            <option>Meals</option>
-                            <option>Office Supplies</option>
-                             <option>Software</option>
-                        </select>
+
+                    <div id="manager" class="tab-pane hidden">
+                        <h2 class="text-2xl font-semibold mb-4 text-odoo-green">Expenses Awaiting My Approval</h2>
+                        <p class="text-sm text-gray-600 mb-4">All amounts are displayed in the company's base currency: **USD**.</p>
+                        <div class="bg-white p-4 md:p-6 rounded-xl shadow-md overflow-x-auto custom-scroll">
+                            <table class="min-w-full divide-y divide-gray-200">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Submitted By</th>
+                                        <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                                        <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
+                                        <th class="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Amount (USD)</th>
+                                        <th class="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Original Amount</th>
+                                        <th class="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="manager-approval-list" class="bg-white divide-y divide-gray-200">
+                                    <!-- Manager approval rows go here -->
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
-                     <div>
-                        <label for="description" class="block text-sm font-medium text-stone-700">Description</label>
-                        <textarea id="description" name="description" rows="3" class="mt-1 shadow-sm focus:ring-indigo-500 focus:border-indigo-500 block w-full sm:text-sm border border-gray-300 rounded-md" placeholder="Client dinner meeting" required></textarea>
+
+                    <div id="admin" class="tab-pane hidden">
+                        <h2 class="text-2xl font-semibold mb-6 text-odoo-green">Admin Configuration</h2>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                            <!-- User Management Card -->
+                            <div class="bg-white p-6 rounded-xl shadow-md">
+                                <h3 class="text-xl font-semibold mb-4 flex items-center"><i data-lucide="users" class="w-5 h-5 mr-2 text-odoo-green"></i> User Roles</h3>
+                                <div id="admin-user-list" class="space-y-3">
+                                    <!-- Admin user list goes here -->
+                                </div>
+                            </div>
+                            <!-- Flow Management Card -->
+                            <div class="bg-white p-6 rounded-xl shadow-md">
+                                <h3 class="text-xl font-semibold mb-4 flex items-center"><i data-lucide="git-branch" class="w-5 h-5 mr-2 text-odoo-green"></i> Approval Flows</h3>
+                                <p class="text-gray-600">Configuration of multi-level and conditional approval steps (To be implemented).</p>
+                                <button class="btn-primary text-white font-semibold py-2 px-4 rounded-lg mt-4 shadow-md text-sm">Create New Flow</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
-                 <div class="mt-6 flex justify-end space-x-3">
-                    <button type="button" onclick="closeModal('expense-modal')" class="bg-white py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none">Cancel</button>
-                    <button type="submit" class="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none">Submit</button>
-                </div>
-            </form>
+            </div>
+        </main>
+        
+        <!-- Custom Modal for Notifications -->
+        <div id="custom-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden items-center justify-center p-4 z-50" onclick="this.classList.add('hidden')">
+            <div class="bg-white rounded-xl p-6 shadow-2xl max-w-sm w-full" onclick="event.stopPropagation()">
+                <h3 id="modal-title" class="text-xl font-bold mb-3 text-odoo-green">Notification</h3>
+                <p id="modal-message" class="text-gray-700 mb-4"></p>
+                <button onclick="document.getElementById('custom-modal').classList.add('hidden')" class="btn-primary text-white font-semibold py-2 px-4 rounded-lg w-full">OK</button>
+            </div>
         </div>
+
     </div>
-    
+
     <script>
-    // --- DATA ---
-    const users = [
-        { id: 1, name: 'Admin User', email: 'admin@odoo.com', role: 'Admin', managerId: null },
-        { id: 2, name: 'Eleanor Vance', email: 'eleanor@odoo.com', role: 'Employee', managerId: 4 },
-        { id: 3, name: 'Marcus Holloway', email: 'marcus@odoo.com', role: 'Employee', managerId: 4 },
-        { id: 4, name: 'Jane Smith', email: 'jane.s@odoo.com', role: 'Manager', managerId: 1 },
-        { id: 5, name: 'John Doe', email: 'john.d@odoo.com', role: 'Manager', managerId: 1 },
-    ];
+        // --- Core Application Logic ---
 
-    let expenses = [
-        { id: 1, userId: 2, date: '2025-10-01', description: 'Flight to Client Site', category: 'Travel', amount: 850.00, currency: 'USD', status: 'Approved' },
-        { id: 2, userId: 2, date: '2025-10-02', description: 'Team Lunch', category: 'Meals', amount: 150.00, currency: 'EUR', status: 'Approved' },
-        { id: 3, userId: 3, date: '2025-10-03', description: 'Project Software License', category: 'Software', amount: 250.00, currency: 'USD', status: 'Rejected' },
-        { id: 4, userId: 3, date: '2025-10-03', description: 'New Keyboard & Mouse', category: 'Office Supplies', amount: 120.00, currency: 'USD', status: 'Pending' },
-        { id: 5, userId: 2, date: '2025-10-04', description: 'Taxi from airport', category: 'Travel', amount: 75.00, currency: 'GBP', status: 'Pending' }
-    ];
+        let currentUserId = 'user-4'; // Default to 'Raesah Shaik' for demo
+        let allExpenses = []; // FIX: Initialize as an empty array to prevent 'undefined' errors
+        let exchangeRates = {}; // Cache for fetched rates
 
-    // --- UTILITY FUNCTIONS ---
-    const getUserById = (id) => users.find(u => u.id === id);
-    const getStatusBadge = (status) => {
-        const colors = {
-            'Approved': 'bg-green-100 text-green-800',
-            'Pending': 'bg-amber-100 text-amber-800',
-            'Rejected': 'bg-red-100 text-red-800',
+        // Helper function to show custom modal (replaces alert/confirm)
+        window.showModal = (title, message) => {
+            document.getElementById('modal-title').textContent = title;
+            document.getElementById('modal-message').textContent = message;
+            document.getElementById('custom-modal').classList.remove('hidden');
+            document.getElementById('custom-modal').classList.add('flex');
         };
-        return `<span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${colors[status]}">${status}</span>`;
-    };
-    
-    // --- RENDER FUNCTIONS ---
-    function renderEmployeeTable() {
-        const tableBody = document.getElementById('employee-expense-table');
-        const employeeExpenses = expenses.filter(e => e.userId === 2); // Simulating logged in as Eleanor
-        tableBody.innerHTML = employeeExpenses.map(e => `
-            <tr class="border-b hover:bg-stone-50">
-                <td class="py-2">${e.date}</td>
-                <td class="py-2">${e.description}</td>
-                <td class="py-2">${e.category}</td>
-                <td class="py-2 text-right">${e.amount.toFixed(2)} ${e.currency}</td>
-                <td class="py-2 text-center">${getStatusBadge(e.status)}</td>
-            </tr>
-        `).join('');
-    }
 
-    function renderManagerTables() {
-        const approvalTable = document.getElementById('manager-approval-table');
-        const teamTable = document.getElementById('manager-team-table');
-        const teamIds = users.filter(u => u.managerId === 4).map(u => u.id); // Simulating Jane's team
-        const teamExpenses = expenses.filter(e => teamIds.includes(e.userId));
-        
-        approvalTable.innerHTML = teamExpenses.filter(e => e.status === 'Pending').map(e => `
-            <tr class="border-b hover:bg-stone-50">
-                <td class="py-2">${getUserById(e.userId).name}</td>
-                <td class="py-2">${e.date}</td>
-                <td class="py-2">${e.description}</td>
-                <td class="py-2 text-right">${(e.amount * 1.08).toFixed(2)} USD</td>
-                <td class="py-2 text-center space-x-2">
-                    <button onclick="handleApproval(${e.id}, 'Approved')" class="text-green-600 hover:text-green-800 font-medium">Approve</button>
-                    <button onclick="handleApproval(${e.id}, 'Rejected')" class="text-red-600 hover:text-red-800 font-medium">Reject</button>
-                </td>
-            </tr>
-        `).join('');
+        // Function to update the UI based on the current user's role
+        const updateUI = () => {
+            const user = window.demoUsers[currentUserId];
+            if (!user) {
+                userRole = 'Employee'; // Default to lowest role if user not found
+            } else {
+                userRole = user.role;
+            }
 
-        teamTable.innerHTML = teamExpenses.map(e => `
-            <tr class="border-b hover:bg-stone-50">
-                <td class="py-2">${getUserById(e.userId).name}</td>
-                <td class="py-2">${e.date}</td>
-                <td class="py-2">${e.description}</td>
-                <td class="py-2 text-right">${e.amount.toFixed(2)} ${e.currency}</td>
-                <td class="py-2 text-center">${getStatusBadge(e.status)}</td>
-            </tr>
-        `).join('');
-    }
-    
-    function renderAdminTables() {
-        const userTable = document.getElementById('user-management-table');
-        userTable.innerHTML = users.map(u => `
-             <tr class="border-b hover:bg-stone-50">
-                <td class="py-2">${u.name}</td>
-                <td class="py-2">${u.email}</td>
-                <td class="py-2">${u.role}</td>
-                <td class="py-2">${u.managerId ? getUserById(u.managerId).name : 'N/A'}</td>
-            </tr>
-        `).join('');
-    }
+            // 1. Update Header Info
+            document.getElementById('user-info').textContent = `${user.name} (${user.role})`;
+            document.getElementById('user-selector').value = currentUserId;
+            
+            // 2. Hide/Show Role-Specific Tabs
+            const managerTab = document.getElementById('manager-tab');
+            const adminTab = document.getElementById('admin-tab');
+            
+            managerTab.style.display = (userRole === 'Manager' || userRole === 'Admin') ? 'block' : 'none';
+            adminTab.style.display = (userRole === 'Admin') ? 'block' : 'none';
 
-    function renderFlowBuilder() {
-        const builder = document.getElementById('flow-builder');
-        builder.innerHTML = `
-            <div class="flow-step">
-                <p class="font-bold">Step 1: Initial Review</p>
-                <div class="mt-2">
-                    <label class="text-sm">Approver Type:</label>
-                    <select class="text-sm rounded-md border-gray-300">
-                        <option selected>Direct Manager</option>
-                        <option>Specific User</option>
-                        <option>Role</option>
-                    </select>
-                </div>
-            </div>
-            <div class="flow-connector"></div>
-            <div class="flow-step">
-                <div class="flex justify-between items-center">
-                    <p class="font-bold">Step 2: Final Approval (Conditional)</p>
-                    <label class="flex items-center space-x-2 text-sm">
-                        <input type="checkbox" class="rounded" checked onchange="toggleConditional(this)">
-                        <span>Is Conditional</span>
-                    </label>
-                </div>
-                <div id="conditional-rules" class="mt-2 space-y-2 bg-indigo-50 p-3 rounded-md">
-                    <p class="text-sm font-medium text-indigo-800">Rule: If expense is > $1000</p>
-                    <select class="text-sm rounded-md border-gray-300 w-full">
-                        <option>Specific approver rule</option>
-                        <option>Percentage rule</option>
-                        <option>Hybrid rule</option>
-                    </select>
-                    <div class="text-sm">
-                        <label>Required Approver:</label>
-                        <select class="text-sm rounded-md border-gray-300">
-                            <option>Admin User (Admin)</option>
-                        </select>
+            // 3. Render Content
+            renderContent();
+
+            // 4. Activate Dashboard tab and icons
+            document.querySelector('.tab-button[data-tab="dashboard"]').click();
+            lucide.createIcons();
+        };
+
+        // Function to render the content for the current role
+        const renderContent = () => {
+            if (userRole === 'Employee') {
+                renderEmployeeDashboard();
+            }
+            if (userRole === 'Manager' || userRole === 'Admin') {
+                renderManagerApprovals();
+            }
+            if (userRole === 'Admin') {
+                renderAdminConfig();
+            }
+        };
+
+        // --- Currency Conversion and Setup ---
+
+        /**
+         * Calculates and sets the base_amount for all expenses using the API.
+         */
+        const calculateBaseAmounts = async () => {
+            const spinner = document.getElementById('loading-spinner');
+            const contentArea = document.getElementById('content-area');
+            spinner.classList.remove('hidden');
+            contentArea.classList.add('hidden');
+            
+            // Defensive check for empty expenses array
+            if (!Array.isArray(allExpenses) || allExpenses.length === 0) {
+                 spinner.classList.add('hidden');
+                 contentArea.classList.remove('hidden');
+                 updateUI();
+                 return;
+            }
+
+            const baseCurrency = window.companyBaseCurrency;
+
+            // 1. Identify all unique foreign currencies needed
+            const currenciesToFetch = new Set(allExpenses
+                .filter(e => e.original_currency !== baseCurrency)
+                .map(e => e.original_currency)
+            );
+
+            // 2. Fetch rates for each unique foreign currency
+            const fetchPromises = Array.from(currenciesToFetch).map(async (from) => {
+                const rate = await window.fetchExchangeRate(from, baseCurrency);
+                exchangeRates[from] = rate;
+            });
+
+            await Promise.all(fetchPromises);
+
+            // 3. Update all expenses with calculated base_amount
+            allExpenses = allExpenses.map(expense => {
+                if (expense.original_currency === baseCurrency) {
+                    expense.base_amount = expense.original_amount;
+                } else {
+                    const rate = exchangeRates[expense.original_currency] || 1.0;
+                    // Formula: Base Amount = Original Amount * Rate (e.g., 55 EUR * (USD/EUR Rate))
+                    expense.base_amount = Math.round(expense.original_amount * rate * 100) / 100;
+                }
+                return expense;
+            });
+
+            spinner.classList.add('hidden');
+            contentArea.classList.remove('hidden');
+
+            // Now the expenses have correct base amounts, update the UI
+            updateUI();
+        };
+
+        // --- Render Functions ---
+
+        const renderEmployeeDashboard = () => {
+            const listEl = document.getElementById('employee-expense-list');
+            listEl.innerHTML = '';
+            
+            const userExpenses = allExpenses.filter(e => e.userId === currentUserId)
+                .sort((a, b) => new Date(b.date) - new Date(a.date));
+
+            if (userExpenses.length === 0) {
+                listEl.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-gray-500">No expenses submitted yet.</td></tr>`;
+                return;
+            }
+
+            userExpenses.forEach(expense => {
+                const row = `
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-700">${expense.date}</td>
+                        <td class="px-3 py-3 whitespace-nowrap text-sm font-medium text-gray-800">${expense.description}</td>
+                        <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-500">${expense.category}</td>
+                        <td class="px-3 py-3 whitespace-nowrap text-sm text-right font-semibold">
+                            ${expense.original_amount.toFixed(2)} ${expense.original_currency}
+                        </td>
+                        <td class="px-3 py-3 whitespace-nowrap text-center">
+                            <span class="status-pill status-${expense.status}">
+                                ${expense.status}
+                            </span>
+                        </td>
+                    </tr>
+                `;
+                listEl.innerHTML += row;
+            });
+        };
+
+        const renderManagerApprovals = () => {
+            const listEl = document.getElementById('manager-approval-list');
+            listEl.innerHTML = '';
+
+            // Filter for expenses awaiting THIS manager's approval (Pending + targeted)
+            const expensesForApproval = allExpenses.filter(e => 
+                e.status === 'Pending' && e.approverId === currentUserId
+            ).sort((a, b) => new Date(a.date) - new Date(b.date));
+
+            if (expensesForApproval.length === 0) {
+                listEl.innerHTML = `<tr><td colspan="6" class="text-center py-4 text-gray-500">No expenses awaiting your approval.</td></tr>`;
+                return;
+            }
+
+            expensesForApproval.forEach(expense => {
+                const row = `
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-3 py-3 whitespace-nowrap text-sm font-medium text-gray-800">${expense.userName}</td>
+                        <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-700">${expense.date}</td>
+                        <td class="px-3 py-3 whitespace-normal max-w-xs text-sm text-gray-500">${expense.description}</td>
+                        <td class="px-3 py-3 whitespace-nowrap text-sm font-semibold text-right text-odoo-green">
+                            $${expense.base_amount.toFixed(2)}
+                        </td>
+                        <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-500 text-right">
+                            (${expense.original_amount.toFixed(2)} ${expense.original_currency})
+                        </td>
+                        <td class="px-3 py-3 whitespace-nowrap text-center space-x-2">
+                            <button onclick="window.handleApproval('${expense.id}', 'Approved')" 
+                                class="bg-green-500 hover:bg-green-600 text-white p-2 rounded-lg text-xs font-semibold shadow-sm">
+                                Approve
+                            </button>
+                            <button onclick="window.handleApproval('${expense.id}', 'Rejected')" 
+                                class="bg-red-500 hover:bg-red-600 text-white p-2 rounded-lg text-xs font-semibold shadow-sm">
+                                Reject
+                            </button>
+                        </td>
+                    </tr>
+                `;
+                listEl.innerHTML += row;
+            });
+        };
+
+        const renderAdminConfig = () => {
+            const listEl = document.getElementById('admin-user-list');
+            listEl.innerHTML = '';
+
+            Object.entries(window.demoUsers).forEach(([id, user]) => {
+                const managerName = user.managerId ? window.demoUsers[user.managerId]?.name || 'N/A' : 'N/A';
+                listEl.innerHTML += `
+                    <div class="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                        <div>
+                            <p class="font-medium">${user.name} <span class="text-xs font-light text-gray-500">(${id})</span></p>
+                            <p class="text-xs text-odoo-green font-semibold">${user.role}</p>
+                            <p class="text-xs text-gray-500">Manager: ${managerName}</p>
+                        </div>
+                        <!-- Action dropdown for changing role/manager (Placeholder) -->
+                        <i data-lucide="settings-2" class="w-4 h-4 text-gray-400 cursor-pointer hover:text-odoo-green"></i>
                     </div>
-                </div>
-            </div>
-        `;
-    }
-
-    // --- CHARTS ---
-    let statusChart, categoryChart;
-    function renderAdminCharts() {
-        const statusCtx = document.getElementById('statusChart').getContext('2d');
-        const categoryCtx = document.getElementById('categoryChart').getContext('2d');
-        
-        const statusCounts = expenses.reduce((acc, e) => {
-            acc[e.status] = (acc[e.status] || 0) + 1;
-            return acc;
-        }, {});
-
-        const categoryCounts = expenses.reduce((acc, e) => {
-            acc[e.category] = (acc[e.category] || 0) + e.amount;
-            return acc;
-        }, {});
-
-        if(statusChart) statusChart.destroy();
-        statusChart = new Chart(statusCtx, {
-            type: 'doughnut',
-            data: {
-                labels: Object.keys(statusCounts),
-                datasets: [{
-                    data: Object.values(statusCounts),
-                    backgroundColor: ['#10b981', '#f59e0b', '#ef4444'],
-                }]
-            },
-            options: { maintainAspectRatio: false, responsive: true }
-        });
-
-        if(categoryChart) categoryChart.destroy();
-        categoryChart = new Chart(categoryCtx, {
-            type: 'bar',
-            data: {
-                labels: Object.keys(categoryCounts),
-                datasets: [{
-                    label: 'Total Spent (USD eq.)',
-                    data: Object.values(categoryCounts),
-                    backgroundColor: '#4f46e5',
-                }]
-            },
-            options: { maintainAspectRatio: false, responsive: true, plugins: { legend: { display: false } } }
-        });
-    }
-
-    // --- INTERACTION HANDLERS ---
-    function switchView(viewName) {
-        document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-        document.getElementById(`${viewName}-view`).classList.add('active');
-        document.getElementById('role-selector').classList.remove('active');
-
-        document.querySelectorAll('.nav-btn').forEach(b => {
-             b.classList.remove('bg-indigo-100', 'text-indigo-700');
-             b.classList.add('text-stone-600');
-        });
-        const activeBtn = document.querySelector(`.nav-btn[data-role="${viewName}"]`);
-        activeBtn.classList.add('bg-indigo-100', 'text-indigo-700');
-
-        if(viewName === 'admin') {
-            renderAdminCharts();
-            renderAdminTables();
-            renderFlowBuilder();
-        } else if(viewName === 'manager') {
-            renderManagerTables();
-        } else if (viewName === 'employee') {
-            renderEmployeeTable();
-        }
-    }
-
-    function handleApproval(expenseId, newStatus) {
-        const expense = expenses.find(e => e.id === expenseId);
-        if(expense) {
-            expense.status = newStatus;
-            renderManagerTables();
-        }
-    }
-    
-    function addFlowStep() {
-        alert("This demonstrates adding a new step to the workflow.");
-    }
-
-    function toggleConditional(checkbox) {
-        const rulesDiv = document.getElementById('conditional-rules');
-        rulesDiv.style.display = checkbox.checked ? 'block' : 'none';
-    }
-    
-    function openModal(modalId) { document.getElementById(modalId).classList.replace('hidden', 'flex'); }
-    function closeModal(modalId) { document.getElementById(modalId).classList.replace('flex', 'hidden'); }
-
-    document.getElementById('expense-form').addEventListener('submit', (e) => {
-        e.preventDefault();
-        const formData = new FormData(e.target);
-        const newExpense = {
-            id: expenses.length + 1,
-            userId: 2, // Hardcoded for Eleanor
-            date: new Date().toISOString().split('T')[0],
-            description: formData.get('description'),
-            category: formData.get('category'),
-            amount: parseFloat(formData.get('amount')),
-            currency: formData.get('currency').toUpperCase(),
-            status: 'Pending'
+                `;
+            });
+            lucide.createIcons();
         };
-        expenses.push(newExpense);
-        renderEmployeeTable();
-        closeModal('expense-modal');
-        e.target.reset();
-    });
 
-    // --- INITIALIZATION ---
-    window.onload = () => {
-        // Initially no view is selected, show role selector
-    };
-</script>
+        // --- Event Handlers ---
 
+        window.submitExpense = async (event) => {
+            event.preventDefault();
+            const submitBtn = document.getElementById('submit-button');
+            const submitText = document.getElementById('submit-text');
+            const submitSpinner = document.getElementById('submit-spinner');
+
+            submitText.textContent = 'Processing...';
+            submitSpinner.classList.remove('hidden');
+            submitBtn.disabled = true;
+
+            const original_currency = document.getElementById('exp-currency').value;
+            const original_amount = parseFloat(document.getElementById('exp-amount').value);
+            const baseCurrency = window.companyBaseCurrency;
+
+            // 1. Calculate the base amount using the API
+            const rate = await window.fetchExchangeRate(original_currency, baseCurrency);
+            const base_amount = Math.round(original_amount * rate * 100) / 100;
+
+            // 2. Construct the new expense object
+            const newExpense = {
+                id: `exp-${Date.now()}`,
+                userId: currentUserId,
+                userName: window.demoUsers[currentUserId].name,
+                date: document.getElementById('exp-date').value,
+                description: document.getElementById('exp-description').value,
+                category: document.getElementById('exp-category').value,
+                original_amount: original_amount,
+                original_currency: original_currency,
+                base_amount: base_amount,
+                status: 'Pending', // Directly to Pending, requiring manager approval
+                approverId: window.demoUsers[currentUserId].managerId || 'admin-1',
+                submitted_on: new Date().toISOString()
+            };
+
+            // 3. Add to the local array (Will be Firestore addition later)
+            allExpenses.push(newExpense);
+            
+            // 4. Update UI and provide feedback
+            renderContent();
+            document.getElementById('expense-form').reset();
+            window.showModal('Success!', `Expense claim submitted successfully for $${base_amount.toFixed(2)} USD (based on ${rate.toFixed(4)} exchange rate).`);
+            
+            submitText.textContent = 'Submit Claim';
+            submitSpinner.classList.add('hidden');
+            submitBtn.disabled = false;
+        };
+
+        window.handleApproval = (expenseId, newStatus) => {
+            const expenseIndex = allExpenses.findIndex(e => e.id === expenseId);
+            if (expenseIndex !== -1) {
+                const expense = allExpenses[expenseIndex];
+
+                // Check for multi-level logic (Simplified for demo: Manager approval is final)
+                if (newStatus === 'Approved') {
+                    expense.status = 'Approved';
+                    window.showModal('Expense Approved', `Claim #${expense.id} for ${expense.userName} has been Approved.`);
+                } else if (newStatus === 'Rejected') {
+                    expense.status = 'Rejected';
+                    window.showModal('Expense Rejected', `Claim #${expense.id} for ${expense.userName} has been Rejected.`);
+                }
+                
+                // Update UI for manager view
+                renderManagerApprovals();
+                // Update UI for employee view (to be handled by Firestore snapshot later)
+                if (userRole === 'Admin') renderEmployeeDashboard(); // Admin can see all, so refresh dashboard
+
+            }
+        };
+
+        window.switchUser = (newUserId) => {
+            currentUserId = newUserId;
+            // Re-run the core update logic to refresh the view for the new user
+            updateUI(); 
+        };
+
+        // --- Initialization ---
+
+        const populateUserSelector = () => {
+            const selector = document.getElementById('user-selector');
+            selector.innerHTML = '';
+            
+            Object.entries(window.demoUsers).forEach(([id, user]) => {
+                const option = document.createElement('option');
+                option.value = id;
+                option.textContent = `${user.name} (${user.role})`;
+                selector.appendChild(option);
+            });
+        };
+
+        // Main setup function called after Firebase auth is ready
+        const setupApplication = async () => {
+            // FIX: Assign static data here to ensure it's loaded after the module script executes
+            allExpenses = Array.isArray(window.staticExpenses) ? window.staticExpenses : [];
+
+            populateUserSelector();
+            // Start the complex, long-running data fetch (currency conversion)
+            await calculateBaseAmounts(); 
+        };
+
+        // Tab switching logic
+        document.querySelectorAll('.tab-button').forEach(button => {
+            button.addEventListener('click', function() {
+                // Deactivate all
+                document.querySelectorAll('.tab-button').forEach(btn => {
+                    btn.classList.remove('border-odoo-green', 'text-odoo-green');
+                    btn.classList.add('text-gray-500');
+                });
+                document.querySelectorAll('.tab-pane').forEach(pane => {
+                    pane.classList.add('hidden');
+                });
+
+                // Activate selected tab
+                this.classList.add('border-odoo-green', 'text-odoo-green');
+                this.classList.remove('text-gray-500', 'border-transparent');
+                
+                const tabId = this.getAttribute('data-tab');
+                document.getElementById(tabId).classList.remove('hidden');
+
+                // Re-render content when tab is switched (important for dynamic data)
+                if (tabId === 'dashboard' && userRole !== 'Manager') renderEmployeeDashboard();
+                if (tabId === 'manager') renderManagerApprovals();
+                if (tabId === 'admin') renderAdminConfig();
+            });
+        });
+
+    </script>
 </body>
 </html>
