@@ -15,19 +15,22 @@
         // Import necessary Firebase functions
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, doc, setDoc, addDoc, onSnapshot, getDoc, updateDoc, query, orderBy } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        // NOTE: We rely on the core functions being exported to window later
+        import { getFirestore, collection, doc, setDoc, addDoc, onSnapshot, getDoc, updateDoc, query, orderBy, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // Global variables provided by the Canvas environment
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        // Ensure firebaseConfig is parsed correctly, providing a fallback for security
         const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
         // Global application state variables
-        let db, auth;
+        let dbInstance = null; // Use a distinct name for internal reference
+        let authInstance = null;
         let userId = null;
         let userProfile = { name: 'Loading', role: 'Employee', managerId: 'manager-1' };
         let isAuthReady = false;
-        let currentUserId = null; // Used for UI simulation/switching
+        let currentUserId = null;
         
         // --- Firestore Collection Paths ---
         const USER_PROFILES_COLLECTION = (uid) => `artifacts/${appId}/users/${uid}/profiles`;
@@ -48,34 +51,57 @@
                 }
                 
                 const app = initializeApp(firebaseConfig);
-                db = getFirestore(app);
-                auth = getAuth(app);
+                dbInstance = getFirestore(app);
+                authInstance = getAuth(app);
+                
+                // Set Firestore logging for debugging
+                setLogLevel('Debug'); 
                 
                 // 2. Authentication
                 if (initialAuthToken) {
-                    await signInWithCustomToken(auth, initialAuthToken);
+                    await signInWithCustomToken(authInstance, initialAuthToken);
                     console.log("Signed in with custom token.");
                 } else {
-                    await signInAnonymously(auth);
+                    await signInAnonymously(authInstance);
                     console.log("Signed in anonymously.");
                 }
                 
                 // 3. Auth State Listener
-                onAuthStateChanged(auth, async (user) => {
+                onAuthStateChanged(authInstance, async (user) => {
                     if (user) {
                         userId = user.uid;
-                        // For demo, we use the authenticated user ID as the active user ID
                         currentUserId = userId; 
+                        
+                        // Wait for profile load before marking ready
                         await fetchOrCreateUserProfile(userId);
+                        
+                        // 4. Expose all necessary resources to the global window object
+                        window.db = dbInstance; // The key fix: ensure DB instance is exposed
+                        window.auth = authInstance;
+                        window.getUserId = () => userId;
+                        window.getUserRole = () => userProfile.role;
+                        window.isAuthReady = () => isAuthReady;
+                        
+                        // Expose Firestore utility functions and collection constant
+                        window.collection = collection;
+                        window.doc = doc;
+                        window.addDoc = addDoc;
+                        window.updateDoc = updateDoc;
+                        window.getDoc = getDoc;
+                        window.EXPENSES_COLLECTION = EXPENSES_COLLECTION;
+
+                        // Call the main setup function in the global script
+                        window.setupApplication();
+
                     } else {
-                        // This case shouldn't happen after signInAnonymously, but safe guard
-                        console.error("User not authenticated.");
+                        console.error("User not authenticated after init.");
+                        // Handle unauthenticated state if necessary
                     }
                 });
 
             } catch (error) {
                 console.error("Firebase Initialization or Auth Error:", error);
-                window.showModal('Error', 'Failed to initialize Firebase and authenticate.');
+                window.showModal('Error', 'Failed to initialize Firebase and authenticate. Check console for details.');
                 spinner.classList.add('hidden');
                 spinner.classList.remove('flex', 'items-center', 'justify-center');
             }
@@ -83,43 +109,44 @@
 
         // --- User Profile Management (New Firestore Logic) ---
         const fetchOrCreateUserProfile = async (uid) => {
-            // Use the corrected collection path
-            const profileRef = doc(db, USER_PROFILES_COLLECTION(uid), 'profile');
+            const profileRef = doc(dbInstance, USER_PROFILES_COLLECTION(uid), 'profile');
             const profileSnap = await getDoc(profileRef);
 
             if (profileSnap.exists()) {
                 userProfile = profileSnap.data();
                 console.log("Profile loaded:", userProfile);
             } else {
-                // Create a default profile for the new authenticated user
                 userProfile = {
                     name: `User ${uid.substring(0, 4)}`,
                     role: 'Employee',
-                    managerId: 'admin-manager-default', // Default manager ID for new users
+                    managerId: 'admin-manager-default', 
                     uid: uid
                 };
                 await setDoc(profileRef, userProfile);
                 console.log("Default profile created:", userProfile);
             }
             
-            // Re-map the current user ID to the new authenticated user
+            // Map users for display in tables
             window.demoUsers = {
                 [uid]: userProfile,
                 'admin-manager-default': { name: 'Default Manager', role: 'Manager', managerId: null, uid: 'admin-manager-default' }
             };
             
             isAuthReady = true;
-            // FIX: setupApplication must be called via window since it's defined in the global script block
-            window.setupApplication();
         };
 
 
         // --- Firestore Real-time Listener (New Logic) ---
-        // FIX: Export startExpenseListener to the window object so it can be called from the global script scope
         window.startExpenseListener = () => {
-            const expensesRef = collection(db, EXPENSES_COLLECTION);
+            // FIX: Ensure dbInstance is available before attempting to get the collection
+            if (!dbInstance) {
+                console.error("Firestore database instance not ready yet.");
+                // Retry listener setup after a short delay if needed, or rely on setupApplication
+                return;
+            }
+
+            const expensesRef = collection(dbInstance, EXPENSES_COLLECTION);
             
-            // Use onSnapshot for real-time updates. No orderBy to avoid index issues.
             onSnapshot(expensesRef, (snapshot) => {
                 window.allExpenses = snapshot.docs.map(doc => ({
                     id: doc.id,
@@ -127,9 +154,6 @@
                 }));
                 
                 console.log(`Fetched ${window.allExpenses.length} expenses in real-time.`);
-                
-                // Re-calculate base amounts immediately upon data update
-                // FIX: Call via window since calculateBaseAmounts is also defined globally
                 window.calculateBaseAmounts(); 
             }, (error) => {
                 console.error("Error fetching real-time expenses:", error);
@@ -142,29 +166,13 @@
         };
 
 
-        // --- Legacy Setup Mapping and Exports ---
+        // --- Legacy Setup Mapping and Exports (Moved after successful auth) ---
         const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-        // FIX: Export all necessary Firebase utility functions and the collection constant
-        window.db = db;
-        window.auth = auth;
-        window.getUserId = () => userId;
-        window.getUserRole = () => userProfile.role;
-        window.isAuthReady = () => isAuthReady;
         window.companyBaseCurrency = 'USD';
-
-        // Firebase Firestore functions needed in the global script scope
-        window.collection = collection;
-        window.doc = doc;
-        window.addDoc = addDoc;
-        window.updateDoc = updateDoc;
-        window.getDoc = getDoc;
-        window.EXPENSES_COLLECTION = EXPENSES_COLLECTION;
-
-        // Initial setup for the app's internal functions
         window.allExpenses = [];
         window.exchangeRates = {};
-        window.demoUsers = {}; // Will be populated by fetchOrCreateUserProfile
+        window.demoUsers = {}; 
 
         window.fetchExchangeRate = async (fromCurrency, toCurrency, maxRetries = 5) => {
             if (fromCurrency === toCurrency) return 1.0;
@@ -202,14 +210,13 @@
             return 1.0; 
         };
 
-        // Set up the listener immediately after the page loads (moved from onload)
+        // Initial setup for the app's internal functions
         window.addEventListener('load', () => {
              // Only run initApp if the user is in a Canvas environment (where the globals are defined)
-             if (typeof __firebase_config !== 'undefined') {
+             if (typeof __firebase_config !== 'undefined' || Object.keys(firebaseConfig).length > 0) {
                 window.initApp();
              } else {
-                // Fallback for local testing (though this will still fail without a real API key)
-                console.warn("Running in non-Canvas environment. Firebase setup skipped.");
+                console.warn("Running in non-Canvas environment without config. Setup skipped.");
                 document.getElementById('loading-spinner').classList.add('hidden');
                 document.getElementById('loading-spinner').classList.remove('flex', 'items-center', 'justify-center');
                 document.getElementById('content-area').classList.remove('hidden');
@@ -285,7 +292,6 @@
             <h1 class="text-xl md:text-2xl font-bold">Odoo Expense Manager</h1>
             <div class="flex items-center space-x-4">
                 <div id="user-info" class="text-sm md:text-base font-medium">Loading User...</div>
-                <!-- User Selector removed as we rely on the authenticated user for the hackathon -->
                 <p id="user-id-display" class="text-xs font-mono bg-white text-gray-800 p-1 rounded-md">ID: ...</p>
             </div>
         </header>
@@ -445,7 +451,6 @@
     <script>
         // --- Core Application Logic ---
         
-        // This is a mapping of UIDs to user profiles, used to show names in tables
         let userProfilesMap = {}; 
         let currentUserId = null;
         let userProfile = {};
@@ -460,13 +465,17 @@
 
         // Function to update the UI based on the current user's profile
         const updateUI = () => {
-            // Update the user profile map
-            // Note: userProfile is set by fetchOrCreateUserProfile in the module script
-            currentUserId = window.getUserId(); // Ensure currentUserId is set
-            userProfile = window.demoUsers[currentUserId]; // Use the map for the latest profile
+            currentUserId = window.getUserId(); 
+            userProfile = window.demoUsers[currentUserId]; 
             
+            // FIX: If userProfile is null (race condition), stop and wait for auth listener to finish
+            if (!userProfile) {
+                console.warn("User profile not ready during UI update, skipping.");
+                return;
+            }
+
             userProfilesMap = {
-                ...window.demoUsers // Use the map populated by the module script
+                ...window.demoUsers 
             };
 
             // 1. Update Header Info
@@ -486,7 +495,7 @@
 
             // 4. Activate Dashboard tab and icons
             const dashboardButton = document.querySelector('.tab-button[data-tab="dashboard"]');
-            if (!dashboardButton.classList.contains('border-odoo-green')) {
+            if (dashboardButton && !dashboardButton.classList.contains('border-odoo-green')) {
                 dashboardButton.click();
             }
             lucide.createIcons();
@@ -507,7 +516,6 @@
 
         /**
          * Calculates and sets the base_amount for all expenses using the API.
-         * FIX: Made globally accessible via window
          */
         window.calculateBaseAmounts = async () => {
             const baseCurrency = window.companyBaseCurrency;
@@ -520,7 +528,6 @@
 
             // 2. Fetch rates for each unique foreign currency
             const fetchPromises = Array.from(currenciesToFetch).map(async (from) => {
-                // Use cache if available
                 if (!window.exchangeRates[from]) {
                     const rate = await window.fetchExchangeRate(from, baseCurrency);
                     window.exchangeRates[from] = rate;
@@ -558,7 +565,6 @@
             const listEl = document.getElementById('employee-expense-list');
             listEl.innerHTML = '';
             
-            // Filter expenses submitted by the current authenticated user
             const userExpenses = window.allExpenses.filter(e => e.userId === currentUserId)
                 .sort((a, b) => new Date(b.date) - new Date(a.date));
 
@@ -592,7 +598,6 @@
             listEl.innerHTML = '';
             const managerId = currentUserId; 
 
-            // Filter for expenses awaiting THIS manager's approval (Pending + targeted to this manager)
             const expensesForApproval = window.allExpenses.filter(e => 
                 e.status === 'Pending' && e.approverId === managerId
             ).sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -641,6 +646,13 @@
 
         window.submitExpense = async (event) => {
             event.preventDefault();
+
+            // FIX: Check if Firebase DB is initialized and ready
+            if (!window.db || !window.isAuthReady()) {
+                window.showModal('Initialization Error', 'Application is still connecting to the database. Please wait a moment and try again.');
+                return;
+            }
+
             const submitBtn = document.getElementById('submit-button');
             const submitText = document.getElementById('submit-text');
             const submitSpinner = document.getElementById('submit-spinner');
@@ -669,12 +681,11 @@
                     original_currency: original_currency,
                     base_amount: base_amount,
                     status: 'Pending', 
-                    approverId: userProfile.managerId || 'admin-manager-default', // Target the user's assigned manager
+                    approverId: userProfile.managerId || 'admin-manager-default', 
                     submitted_on: new Date().toISOString()
                 };
 
-                // 3. Write to Firestore (Real-time listener will handle UI update)
-                // Now using globally exposed functions: window.collection and window.EXPENSES_COLLECTION
+                // 3. Write to Firestore (using globally exposed functions)
                 const expensesCollectionRef = window.collection(window.db, window.EXPENSES_COLLECTION);
                 await window.addDoc(expensesCollectionRef, newExpenseData);
                 
@@ -683,7 +694,8 @@
                 window.showModal('Success!', `Expense claim submitted successfully for approval. Value: $${base_amount.toFixed(2)} USD.`);
             } catch (e) {
                 console.error("Error submitting expense:", e);
-                window.showModal('Submission Failed', `An error occurred: ${e.message}. Please try again.`);
+                // The main error you saw previously is handled here with a generic message.
+                window.showModal('Submission Failed', `An error occurred: ${e.message}. Expected a FirebaseFirestore instance.`);
             } finally {
                 submitText.textContent = 'Submit Claim';
                 submitSpinner.classList.add('hidden');
@@ -692,13 +704,18 @@
         };
 
         window.handleApproval = async (expenseId, newStatus, event) => {
+             // FIX: Check if Firebase DB is initialized and ready
+            if (!window.db || !window.isAuthReady()) {
+                window.showModal('Initialization Error', 'Application is still connecting to the database. Please wait a moment and try again.');
+                return;
+            }
+            
              const approvalBtn = event.target;
              approvalBtn.disabled = true;
              approvalBtn.textContent = '...';
 
             try {
-                // Get reference to the specific document
-                // Now using globally exposed functions: window.doc and window.EXPENSES_COLLECTION
+                // Get reference to the specific document (using globally exposed functions)
                 const expenseDocRef = window.doc(window.db, window.EXPENSES_COLLECTION, expenseId);
                 
                 // Update the document status in Firestore
@@ -709,12 +726,10 @@
                 });
 
                 window.showModal(`Expense ${newStatus}`, `Claim #${expenseId.substring(0, 8)}... has been ${newStatus}.`);
-                // The onSnapshot listener will automatically call calculateBaseAmounts and update the UI
             } catch (e) {
                 console.error(`Error ${newStatus}ing expense:`, e);
                 window.showModal('Action Failed', `Failed to update expense status: ${e.message}`);
             } finally {
-                 // Re-enable button (though the UI will refresh instantly anyway)
                  approvalBtn.disabled = false;
                  approvalBtn.textContent = newStatus;
             }
@@ -725,15 +740,12 @@
 
         /**
          * Main setup function called after Firebase auth is ready and profile is loaded
-         * FIX: Made globally accessible via window to be callable from the module script.
          */
         window.setupApplication = async () => {
              currentUserId = window.getUserId();
-             userProfile = window.demoUsers[currentUserId]; // Use the global demoUsers map
+             userProfile = window.demoUsers[currentUserId]; 
              
-             // Start the real-time listener. This call will trigger the first data load, 
-             // which in turn calls calculateBaseAmounts and updateUI.
-             // FIX: Called via window to access the function exposed in the module script.
+             // Start the real-time listener.
              window.startExpenseListener();
         };
 
@@ -756,7 +768,7 @@
                 const tabId = this.getAttribute('data-tab');
                 document.getElementById(tabId).classList.remove('hidden');
 
-                // Re-render content when tab is switched (uses latest global data)
+                // Re-render content when tab is switched 
                 renderContent();
             });
         });
