@@ -12,79 +12,160 @@
     <script src="https://unpkg.com/lucide@latest"></script>
     <!-- Load Firebase Modules -->
     <script type="module">
+        // Import necessary Firebase functions
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, doc, setDoc, query, where, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, doc, setDoc, addDoc, onSnapshot, getDoc, updateDoc, query, orderBy } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // Global variables provided by the Canvas environment
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
         const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
+        // Global application state variables
         let db, auth;
         let userId = null;
-        let userRole = 'Employee'; // Default role
+        let userProfile = { name: 'Loading', role: 'Employee', managerId: 'manager-1' };
         let isAuthReady = false;
-        let userManagerId = 'manager-1'; // Static manager for demo purposes
+        let currentUserId = null; // Used for UI simulation/switching
+        
+        // --- Firestore Collection Paths ---
+        const USER_PROFILES_COLLECTION = (uid) => `artifacts/${appId}/users/${uid}/profiles`;
+        const EXPENSES_COLLECTION = `artifacts/${appId}/public/data/expenses`;
 
-        // App initialization function
+        // --- Core Authentication and Setup ---
         window.initApp = async () => {
+            const spinner = document.getElementById('loading-spinner');
+            spinner.classList.remove('hidden');
+            spinner.classList.add('flex', 'items-center', 'justify-center');
+
             try {
                 // 1. Initialize Firebase
-                if (Object.keys(firebaseConfig).length === 0) {
-                     console.warn("Firebase config is missing. Using static demo data only.");
+                if (Object.keys(firebaseConfig).length === 0 || !firebaseConfig.projectId) {
+                     console.error("Firebase config is missing or invalid. Application requires Firestore.");
+                     window.showModal('Error', 'Firebase configuration is missing. Cannot run in real-time mode.');
+                     return;
+                }
+                
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                
+                // 2. Authentication
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                    console.log("Signed in with custom token.");
                 } else {
-                    const app = initializeApp(firebaseConfig);
-                    db = getFirestore(app);
-                    auth = getAuth(app);
-                    
-                    // 2. Authentication
-                    if (initialAuthToken) {
-                        await signInWithCustomToken(auth, initialAuthToken);
-                        console.log("Signed in with custom token.");
+                    await signInAnonymously(auth);
+                    console.log("Signed in anonymously.");
+                }
+                
+                // 3. Auth State Listener
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        // For demo, we use the authenticated user ID as the active user ID
+                        currentUserId = userId; 
+                        await fetchOrCreateUserProfile(userId);
                     } else {
-                        await signInAnonymously(auth);
-                        console.log("Signed in anonymously.");
+                        // This case shouldn't happen after signInAnonymously, but safe guard
+                        console.error("User not authenticated.");
                     }
-                    
-                    // 3. Auth State Listener
-                    onAuthStateChanged(auth, (user) => {
-                        if (user) {
-                            userId = user.uid;
-                        } else {
-                             // Fallback for anonymous users
-                            userId = crypto.randomUUID(); 
-                        }
-                        console.log(`User ID: ${userId}`);
-                        isAuthReady = true;
-                        // Start the application setup only after auth is ready
-                        setupApplication();
-                    });
-                }
-
-                // If no Firebase config, proceed immediately with static demo data
-                if (Object.keys(firebaseConfig).length === 0) {
-                    isAuthReady = true;
-                    setupApplication();
-                }
+                });
 
             } catch (error) {
                 console.error("Firebase Initialization or Auth Error:", error);
-                // Fallback to static data if Firebase fails
-                isAuthReady = true;
-                setupApplication();
+                window.showModal('Error', 'Failed to initialize Firebase and authenticate.');
+                spinner.classList.add('hidden');
+                spinner.classList.remove('flex', 'items-center', 'justify-center');
             }
         };
 
-        // Delay utility for exponential backoff
+        // --- User Profile Management (New Firestore Logic) ---
+        const fetchOrCreateUserProfile = async (uid) => {
+            // Use the corrected collection path
+            const profileRef = doc(db, USER_PROFILES_COLLECTION(uid), 'profile');
+            const profileSnap = await getDoc(profileRef);
+
+            if (profileSnap.exists()) {
+                userProfile = profileSnap.data();
+                console.log("Profile loaded:", userProfile);
+            } else {
+                // Create a default profile for the new authenticated user
+                userProfile = {
+                    name: `User ${uid.substring(0, 4)}`,
+                    role: 'Employee',
+                    managerId: 'admin-manager-default', // Default manager ID for new users
+                    uid: uid
+                };
+                await setDoc(profileRef, userProfile);
+                console.log("Default profile created:", userProfile);
+            }
+            
+            // Re-map the current user ID to the new authenticated user
+            window.demoUsers = {
+                [uid]: userProfile,
+                'admin-manager-default': { name: 'Default Manager', role: 'Manager', managerId: null, uid: 'admin-manager-default' }
+            };
+            
+            isAuthReady = true;
+            // FIX: setupApplication must be called via window since it's defined in the global script block
+            window.setupApplication();
+        };
+
+
+        // --- Firestore Real-time Listener (New Logic) ---
+        // FIX: Export startExpenseListener to the window object so it can be called from the global script scope
+        window.startExpenseListener = () => {
+            const expensesRef = collection(db, EXPENSES_COLLECTION);
+            
+            // Use onSnapshot for real-time updates. No orderBy to avoid index issues.
+            onSnapshot(expensesRef, (snapshot) => {
+                window.allExpenses = snapshot.docs.map(doc => ({
+                    id: doc.id,
+                    ...doc.data()
+                }));
+                
+                console.log(`Fetched ${window.allExpenses.length} expenses in real-time.`);
+                
+                // Re-calculate base amounts immediately upon data update
+                // FIX: Call via window since calculateBaseAmounts is also defined globally
+                window.calculateBaseAmounts(); 
+            }, (error) => {
+                console.error("Error fetching real-time expenses:", error);
+                window.showModal('Error', 'Failed to subscribe to real-time expense data.');
+                const spinner = document.getElementById('loading-spinner');
+                spinner.classList.add('hidden');
+                spinner.classList.remove('flex', 'items-center', 'justify-center');
+                document.getElementById('content-area').classList.remove('hidden');
+            });
+        };
+
+
+        // --- Legacy Setup Mapping and Exports ---
         const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-        /**
-         * Fetches exchange rate from BASE_CURRENCY to TARGET_CURRENCY with exponential backoff.
-         * @param {string} fromCurrency - The base currency (e.g., 'USD').
-         * @param {string} toCurrency - The target currency (e.g., 'EUR').
-         * @returns {Promise<number>} - The exchange rate.
-         */
+        // FIX: Export all necessary Firebase utility functions and the collection constant
+        window.db = db;
+        window.auth = auth;
+        window.getUserId = () => userId;
+        window.getUserRole = () => userProfile.role;
+        window.isAuthReady = () => isAuthReady;
+        window.companyBaseCurrency = 'USD';
+
+        // Firebase Firestore functions needed in the global script scope
+        window.collection = collection;
+        window.doc = doc;
+        window.addDoc = addDoc;
+        window.updateDoc = updateDoc;
+        window.getDoc = getDoc;
+        window.EXPENSES_COLLECTION = EXPENSES_COLLECTION;
+
+        // Initial setup for the app's internal functions
+        window.allExpenses = [];
+        window.exchangeRates = {};
+        window.demoUsers = {}; // Will be populated by fetchOrCreateUserProfile
+
         window.fetchExchangeRate = async (fromCurrency, toCurrency, maxRetries = 5) => {
             if (fromCurrency === toCurrency) return 1.0;
             const apiUrl = `https://api.exchangerate-api.com/v4/latest/${fromCurrency}`;
@@ -93,7 +174,6 @@
                 try {
                     const response = await fetch(apiUrl);
                     if (!response.ok) {
-                        // Check for rate limiting or other recoverable errors
                         if (response.status === 429 && attempt < maxRetries - 1) {
                             throw new Error(`Rate limit hit or temporary API error (Status: ${response.status}). Retrying...`);
                         }
@@ -102,7 +182,6 @@
 
                     const data = await response.json();
                     if (data.rates && data.rates[toCurrency]) {
-                        // Return the rate for the target currency
                         return data.rates[toCurrency];
                     } else {
                         throw new Error(`Could not find rate for ${toCurrency} in the API response.`);
@@ -111,46 +190,31 @@
                 } catch (error) {
                     console.error(`Attempt ${attempt + 1} failed:`, error.message);
                     if (attempt < maxRetries - 1) {
-                        const waitTime = Math.pow(2, attempt) * 1000 + (Math.random() * 1000); // 1s, 2s, 4s, 8s, ...
+                        const waitTime = Math.pow(2, attempt) * 1000 + (Math.random() * 1000); 
                         console.log(`Waiting ${Math.round(waitTime / 1000)}s before retrying...`);
                         await delay(waitTime);
                     } else {
                         console.error(`Maximum retries reached for ${fromCurrency} to ${toCurrency}. Falling back to 1.0.`);
-                        return 1.0; // Fallback to 1.0 to prevent app crash
+                        return 1.0; 
                     }
                 }
             }
-            return 1.0; // Should not be reached, but safe fallback
+            return 1.0; 
         };
 
-        // Global functions and data available to the rest of the script
-        window.db = db;
-        window.auth = auth;
-        window.getUserId = () => userId;
-        window.getUserRole = () => userRole;
-        window.isAuthReady = () => isAuthReady;
-        window.userManagerId = userManagerId;
-
-        window.companyBaseCurrency = 'USD'; // Static for demo
-
-        // Initial demo data (will be replaced by Firestore later)
-        window.staticExpenses = [
-            { id: 'exp-001', userId: 'user-2', userName: 'Jane Smith', date: '2025-09-01', description: 'Client lunch meeting', category: 'Meals', original_amount: 55.00, original_currency: 'EUR', base_amount: 0, status: 'Pending', approverId: 'manager-1' },
-            { id: 'exp-002', userId: 'user-2', userName: 'Jane Smith', date: '2025-09-03', description: 'Train ticket to Berlin', category: 'Travel', original_amount: 150.00, original_currency: 'EUR', base_amount: 0, status: 'Approved', approverId: 'manager-1' },
-            { id: 'exp-003', userId: 'user-3', userName: 'John Doe', date: '2025-09-05', description: 'Google Workspace Subscription', category: 'Software', original_amount: 120.00, original_currency: 'USD', base_amount: 0, status: 'Draft', approverId: 'manager-1' },
-            { id: 'exp-004', userId: 'user-3', userName: 'John Doe', date: '2025-09-07', description: 'Hotel stay for conference', category: 'Travel', original_amount: 550.00, original_currency: 'GBP', base_amount: 0, status: 'Pending', approverId: 'manager-1' },
-            { id: 'exp-005', userId: 'user-4', userName: 'Raesah Shaik', date: '2025-09-10', description: 'Taxi to Airport', category: 'Travel', original_amount: 45.00, original_currency: 'USD', base_amount: 0, status: 'Pending', approverId: 'manager-1' },
-            { id: 'exp-006', userId: 'user-4', userName: 'Raesah Shaik', date: '2025-09-12', description: 'Office Supplies', category: 'Supplies', original_amount: 25.00, original_currency: 'USD', base_amount: 0, status: 'Approved', approverId: 'manager-1' },
-        ];
-
-        // Static user mapping for demo
-        window.demoUsers = {
-            'user-1': { name: 'Admin User', role: 'Admin', managerId: null },
-            'manager-1': { name: 'Alice Johnson', role: 'Manager', managerId: 'user-1' }, // User ID 'manager-1' is manager for all demo users
-            'user-2': { name: 'Jane Smith', role: 'Employee', managerId: 'manager-1' },
-            'user-3': { name: 'John Doe', role: 'Employee', managerId: 'manager-1' },
-            'user-4': { name: 'Raesah Shaik', role: 'Employee', managerId: 'manager-1' } // This user will be selected by default
-        };
+        // Set up the listener immediately after the page loads (moved from onload)
+        window.addEventListener('load', () => {
+             // Only run initApp if the user is in a Canvas environment (where the globals are defined)
+             if (typeof __firebase_config !== 'undefined') {
+                window.initApp();
+             } else {
+                // Fallback for local testing (though this will still fail without a real API key)
+                console.warn("Running in non-Canvas environment. Firebase setup skipped.");
+                document.getElementById('loading-spinner').classList.add('hidden');
+                document.getElementById('loading-spinner').classList.remove('flex', 'items-center', 'justify-center');
+                document.getElementById('content-area').classList.remove('hidden');
+             }
+        });
         
     </script>
     <style>
@@ -213,7 +277,7 @@
         }
     </style>
 </head>
-<body onload="initApp()">
+<body>
 
     <div id="app" class="min-h-screen flex flex-col">
         <!-- Header -->
@@ -221,31 +285,25 @@
             <h1 class="text-xl md:text-2xl font-bold">Odoo Expense Manager</h1>
             <div class="flex items-center space-x-4">
                 <div id="user-info" class="text-sm md:text-base font-medium">Loading User...</div>
-                <div class="relative">
-                    <select id="user-selector" onchange="window.switchUser(this.value)" class="p-2 pr-10 rounded-lg text-sm md:text-base bg-white text-gray-800 appearance-none cursor-pointer">
-                        <!-- Options populated by JS -->
-                    </select>
-                    <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-700">
-                        <svg class="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
-                    </div>
-                </div>
+                <!-- User Selector removed as we rely on the authenticated user for the hackathon -->
+                <p id="user-id-display" class="text-xs font-mono bg-white text-gray-800 p-1 rounded-md">ID: ...</p>
             </div>
         </header>
 
         <!-- Main Content Area -->
         <main class="flex-grow p-4 md:p-8">
-            <div id="loading-spinner" class="text-center py-12 hidden">
+            <div id="loading-spinner" class="text-center py-12 flex items-center justify-center">
                 <svg class="animate-spin h-8 w-8 text-odoo-green mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                     <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
-                <p class="mt-2 text-gray-600">Loading application data...</p>
+                <p class="mt-2 text-gray-600">Connecting to database and fetching expenses...</p>
             </div>
 
             <div id="content-area" class="space-y-10 hidden">
                 <!-- Tabs for main navigation -->
                 <div class="flex border-b border-gray-200">
-                    <button class="tab-button px-4 py-2 text-sm md:text-base font-medium border-b-2 border-transparent transition duration-150 ease-in-out" data-tab="dashboard">Dashboard</button>
+                    <button class="tab-button px-4 py-2 text-sm md:text-base font-medium border-b-2 border-transparent transition duration-150 ease-in-out" data-tab="dashboard">My Expenses</button>
                     <button class="tab-button px-4 py-2 text-sm md:text-base font-medium border-b-2 border-transparent transition duration-150 ease-in-out" data-tab="submission">Submit Expense</button>
                     <button class="tab-button px-4 py-2 text-sm md:text-base font-medium border-b-2 border-transparent transition duration-150 ease-in-out" data-tab="manager" id="manager-tab" style="display:none;">Approvals</button>
                     <button class="tab-button px-4 py-2 text-sm md:text-base font-medium border-b-2 border-transparent transition duration-150 ease-in-out" data-tab="admin" id="admin-tab" style="display:none;">Admin Config</button>
@@ -351,14 +409,21 @@
                             <div class="bg-white p-6 rounded-xl shadow-md">
                                 <h3 class="text-xl font-semibold mb-4 flex items-center"><i data-lucide="users" class="w-5 h-5 mr-2 text-odoo-green"></i> User Roles</h3>
                                 <div id="admin-user-list" class="space-y-3">
-                                    <!-- Admin user list goes here -->
+                                    <p class="text-gray-600">User management is simplified to the currently logged in user for the hackathon environment.</p>
+                                    <div class="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                                        <div>
+                                            <p class="font-medium" id="admin-current-user-name">...</p>
+                                            <p class="text-xs text-odoo-green font-semibold" id="admin-current-user-role">...</p>
+                                            <p class="text-xs text-gray-500">Manager: Default Manager (admin-manager-default)</p>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                             <!-- Flow Management Card -->
                             <div class="bg-white p-6 rounded-xl shadow-md">
                                 <h3 class="text-xl font-semibold mb-4 flex items-center"><i data-lucide="git-branch" class="w-5 h-5 mr-2 text-odoo-green"></i> Approval Flows</h3>
-                                <p class="text-gray-600">Configuration of multi-level and conditional approval steps (To be implemented).</p>
-                                <button class="btn-primary text-white font-semibold py-2 px-4 rounded-lg mt-4 shadow-md text-sm">Create New Flow</button>
+                                <p class="text-gray-600">The current approval flow is a single-step: Employee -> Manager (Default).</p>
+                                <button class="btn-primary text-white font-semibold py-2 px-4 rounded-lg mt-4 shadow-md text-sm cursor-not-allowed opacity-50">Create New Flow (Disabled)</button>
                             </div>
                         </div>
                     </div>
@@ -379,11 +444,12 @@
 
     <script>
         // --- Core Application Logic ---
-
-        let currentUserId = 'user-4'; // Default to 'Raesah Shaik' for demo
-        let allExpenses = []; // FIX: Initialize as an empty array to prevent 'undefined' errors
-        let exchangeRates = {}; // Cache for fetched rates
-
+        
+        // This is a mapping of UIDs to user profiles, used to show names in tables
+        let userProfilesMap = {}; 
+        let currentUserId = null;
+        let userProfile = {};
+        
         // Helper function to show custom modal (replaces alert/confirm)
         window.showModal = (title, message) => {
             document.getElementById('modal-title').textContent = title;
@@ -392,98 +458,97 @@
             document.getElementById('custom-modal').classList.add('flex');
         };
 
-        // Function to update the UI based on the current user's role
+        // Function to update the UI based on the current user's profile
         const updateUI = () => {
-            const user = window.demoUsers[currentUserId];
-            if (!user) {
-                userRole = 'Employee'; // Default to lowest role if user not found
-            } else {
-                userRole = user.role;
-            }
+            // Update the user profile map
+            // Note: userProfile is set by fetchOrCreateUserProfile in the module script
+            currentUserId = window.getUserId(); // Ensure currentUserId is set
+            userProfile = window.demoUsers[currentUserId]; // Use the map for the latest profile
+            
+            userProfilesMap = {
+                ...window.demoUsers // Use the map populated by the module script
+            };
 
             // 1. Update Header Info
-            document.getElementById('user-info').textContent = `${user.name} (${user.role})`;
-            document.getElementById('user-selector').value = currentUserId;
+            document.getElementById('user-info').textContent = `${userProfile.name} (${userProfile.role})`;
+            document.getElementById('user-id-display').textContent = `ID: ${currentUserId.substring(0, 8)}...`;
             
             // 2. Hide/Show Role-Specific Tabs
             const managerTab = document.getElementById('manager-tab');
             const adminTab = document.getElementById('admin-tab');
+            const role = userProfile.role;
             
-            managerTab.style.display = (userRole === 'Manager' || userRole === 'Admin') ? 'block' : 'none';
-            adminTab.style.display = (userRole === 'Admin') ? 'block' : 'none';
+            managerTab.style.display = (role === 'Manager' || role === 'Admin') ? 'block' : 'none';
+            adminTab.style.display = (role === 'Admin') ? 'block' : 'none';
 
             // 3. Render Content
             renderContent();
 
             // 4. Activate Dashboard tab and icons
-            document.querySelector('.tab-button[data-tab="dashboard"]').click();
+            const dashboardButton = document.querySelector('.tab-button[data-tab="dashboard"]');
+            if (!dashboardButton.classList.contains('border-odoo-green')) {
+                dashboardButton.click();
+            }
             lucide.createIcons();
         };
 
         // Function to render the content for the current role
         const renderContent = () => {
-            if (userRole === 'Employee') {
-                renderEmployeeDashboard();
-            }
-            if (userRole === 'Manager' || userRole === 'Admin') {
+            renderEmployeeDashboard();
+            if (userProfile.role === 'Manager' || userProfile.role === 'Admin') {
                 renderManagerApprovals();
             }
-            if (userRole === 'Admin') {
+            if (userProfile.role === 'Admin') {
                 renderAdminConfig();
             }
         };
 
-        // --- Currency Conversion and Setup ---
+        // --- Currency Conversion ---
 
         /**
          * Calculates and sets the base_amount for all expenses using the API.
+         * FIX: Made globally accessible via window
          */
-        const calculateBaseAmounts = async () => {
-            const spinner = document.getElementById('loading-spinner');
-            const contentArea = document.getElementById('content-area');
-            spinner.classList.remove('hidden');
-            contentArea.classList.add('hidden');
-            
-            // Defensive check for empty expenses array
-            if (!Array.isArray(allExpenses) || allExpenses.length === 0) {
-                 spinner.classList.add('hidden');
-                 contentArea.classList.remove('hidden');
-                 updateUI();
-                 return;
-            }
-
+        window.calculateBaseAmounts = async () => {
             const baseCurrency = window.companyBaseCurrency;
 
             // 1. Identify all unique foreign currencies needed
-            const currenciesToFetch = new Set(allExpenses
+            const currenciesToFetch = new Set(window.allExpenses
                 .filter(e => e.original_currency !== baseCurrency)
                 .map(e => e.original_currency)
             );
 
             // 2. Fetch rates for each unique foreign currency
             const fetchPromises = Array.from(currenciesToFetch).map(async (from) => {
-                const rate = await window.fetchExchangeRate(from, baseCurrency);
-                exchangeRates[from] = rate;
+                // Use cache if available
+                if (!window.exchangeRates[from]) {
+                    const rate = await window.fetchExchangeRate(from, baseCurrency);
+                    window.exchangeRates[from] = rate;
+                }
             });
 
             await Promise.all(fetchPromises);
 
-            // 3. Update all expenses with calculated base_amount
-            allExpenses = allExpenses.map(expense => {
+            // 3. Update all expenses with calculated base_amount (locally only for display)
+            window.allExpenses = window.allExpenses.map(expense => {
                 if (expense.original_currency === baseCurrency) {
                     expense.base_amount = expense.original_amount;
                 } else {
-                    const rate = exchangeRates[expense.original_currency] || 1.0;
-                    // Formula: Base Amount = Original Amount * Rate (e.g., 55 EUR * (USD/EUR Rate))
+                    const rate = window.exchangeRates[expense.original_currency] || 1.0;
                     expense.base_amount = Math.round(expense.original_amount * rate * 100) / 100;
                 }
                 return expense;
             });
 
-            spinner.classList.add('hidden');
-            contentArea.classList.remove('hidden');
-
-            // Now the expenses have correct base amounts, update the UI
+            // Hide spinner and show content only after the first data load + conversion
+            const spinner = document.getElementById('loading-spinner');
+            const contentArea = document.getElementById('content-area');
+            if(spinner.classList.contains('flex') || spinner.classList.contains('animate-spin')){
+                 spinner.classList.add('hidden');
+                 spinner.classList.remove('flex', 'items-center', 'justify-center');
+                 contentArea.classList.remove('hidden');
+            }
+            
             updateUI();
         };
 
@@ -493,7 +558,8 @@
             const listEl = document.getElementById('employee-expense-list');
             listEl.innerHTML = '';
             
-            const userExpenses = allExpenses.filter(e => e.userId === currentUserId)
+            // Filter expenses submitted by the current authenticated user
+            const userExpenses = window.allExpenses.filter(e => e.userId === currentUserId)
                 .sort((a, b) => new Date(b.date) - new Date(a.date));
 
             if (userExpenses.length === 0) {
@@ -524,10 +590,11 @@
         const renderManagerApprovals = () => {
             const listEl = document.getElementById('manager-approval-list');
             listEl.innerHTML = '';
+            const managerId = currentUserId; 
 
-            // Filter for expenses awaiting THIS manager's approval (Pending + targeted)
-            const expensesForApproval = allExpenses.filter(e => 
-                e.status === 'Pending' && e.approverId === currentUserId
+            // Filter for expenses awaiting THIS manager's approval (Pending + targeted to this manager)
+            const expensesForApproval = window.allExpenses.filter(e => 
+                e.status === 'Pending' && e.approverId === managerId
             ).sort((a, b) => new Date(a.date) - new Date(b.date));
 
             if (expensesForApproval.length === 0) {
@@ -536,9 +603,10 @@
             }
 
             expensesForApproval.forEach(expense => {
+                const userName = userProfilesMap[expense.userId]?.name || 'Unknown User';
                 const row = `
                     <tr class="hover:bg-gray-50">
-                        <td class="px-3 py-3 whitespace-nowrap text-sm font-medium text-gray-800">${expense.userName}</td>
+                        <td class="px-3 py-3 whitespace-nowrap text-sm font-medium text-gray-800">${userName}</td>
                         <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-700">${expense.date}</td>
                         <td class="px-3 py-3 whitespace-normal max-w-xs text-sm text-gray-500">${expense.description}</td>
                         <td class="px-3 py-3 whitespace-nowrap text-sm font-semibold text-right text-odoo-green">
@@ -548,11 +616,11 @@
                             (${expense.original_amount.toFixed(2)} ${expense.original_currency})
                         </td>
                         <td class="px-3 py-3 whitespace-nowrap text-center space-x-2">
-                            <button onclick="window.handleApproval('${expense.id}', 'Approved')" 
+                            <button onclick="window.handleApproval('${expense.id}', 'Approved', event)" 
                                 class="bg-green-500 hover:bg-green-600 text-white p-2 rounded-lg text-xs font-semibold shadow-sm">
                                 Approve
                             </button>
-                            <button onclick="window.handleApproval('${expense.id}', 'Rejected')" 
+                            <button onclick="window.handleApproval('${expense.id}', 'Rejected', event)" 
                                 class="bg-red-500 hover:bg-red-600 text-white p-2 rounded-lg text-xs font-semibold shadow-sm">
                                 Reject
                             </button>
@@ -564,27 +632,12 @@
         };
 
         const renderAdminConfig = () => {
-            const listEl = document.getElementById('admin-user-list');
-            listEl.innerHTML = '';
-
-            Object.entries(window.demoUsers).forEach(([id, user]) => {
-                const managerName = user.managerId ? window.demoUsers[user.managerId]?.name || 'N/A' : 'N/A';
-                listEl.innerHTML += `
-                    <div class="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
-                        <div>
-                            <p class="font-medium">${user.name} <span class="text-xs font-light text-gray-500">(${id})</span></p>
-                            <p class="text-xs text-odoo-green font-semibold">${user.role}</p>
-                            <p class="text-xs text-gray-500">Manager: ${managerName}</p>
-                        </div>
-                        <!-- Action dropdown for changing role/manager (Placeholder) -->
-                        <i data-lucide="settings-2" class="w-4 h-4 text-gray-400 cursor-pointer hover:text-odoo-green"></i>
-                    </div>
-                `;
-            });
+            document.getElementById('admin-current-user-name').textContent = `${userProfile.name} (${currentUserId.substring(0, 8)}...)`;
+            document.getElementById('admin-current-user-role').textContent = userProfile.role;
             lucide.createIcons();
         };
 
-        // --- Event Handlers ---
+        // --- Data Write Handlers (Updated to use Firestore) ---
 
         window.submitExpense = async (event) => {
             event.preventDefault();
@@ -600,89 +653,88 @@
             const original_amount = parseFloat(document.getElementById('exp-amount').value);
             const baseCurrency = window.companyBaseCurrency;
 
-            // 1. Calculate the base amount using the API
-            const rate = await window.fetchExchangeRate(original_currency, baseCurrency);
-            const base_amount = Math.round(original_amount * rate * 100) / 100;
+            try {
+                // 1. Calculate the base amount using the API
+                const rate = await window.fetchExchangeRate(original_currency, baseCurrency);
+                const base_amount = Math.round(original_amount * rate * 100) / 100;
 
-            // 2. Construct the new expense object
-            const newExpense = {
-                id: `exp-${Date.now()}`,
-                userId: currentUserId,
-                userName: window.demoUsers[currentUserId].name,
-                date: document.getElementById('exp-date').value,
-                description: document.getElementById('exp-description').value,
-                category: document.getElementById('exp-category').value,
-                original_amount: original_amount,
-                original_currency: original_currency,
-                base_amount: base_amount,
-                status: 'Pending', // Directly to Pending, requiring manager approval
-                approverId: window.demoUsers[currentUserId].managerId || 'admin-1',
-                submitted_on: new Date().toISOString()
-            };
+                // 2. Construct the new expense object
+                const newExpenseData = {
+                    userId: currentUserId,
+                    userName: userProfile.name,
+                    date: document.getElementById('exp-date').value,
+                    description: document.getElementById('exp-description').value,
+                    category: document.getElementById('exp-category').value,
+                    original_amount: original_amount,
+                    original_currency: original_currency,
+                    base_amount: base_amount,
+                    status: 'Pending', 
+                    approverId: userProfile.managerId || 'admin-manager-default', // Target the user's assigned manager
+                    submitted_on: new Date().toISOString()
+                };
 
-            // 3. Add to the local array (Will be Firestore addition later)
-            allExpenses.push(newExpense);
-            
-            // 4. Update UI and provide feedback
-            renderContent();
-            document.getElementById('expense-form').reset();
-            window.showModal('Success!', `Expense claim submitted successfully for $${base_amount.toFixed(2)} USD (based on ${rate.toFixed(4)} exchange rate).`);
-            
-            submitText.textContent = 'Submit Claim';
-            submitSpinner.classList.add('hidden');
-            submitBtn.disabled = false;
-        };
-
-        window.handleApproval = (expenseId, newStatus) => {
-            const expenseIndex = allExpenses.findIndex(e => e.id === expenseId);
-            if (expenseIndex !== -1) {
-                const expense = allExpenses[expenseIndex];
-
-                // Check for multi-level logic (Simplified for demo: Manager approval is final)
-                if (newStatus === 'Approved') {
-                    expense.status = 'Approved';
-                    window.showModal('Expense Approved', `Claim #${expense.id} for ${expense.userName} has been Approved.`);
-                } else if (newStatus === 'Rejected') {
-                    expense.status = 'Rejected';
-                    window.showModal('Expense Rejected', `Claim #${expense.id} for ${expense.userName} has been Rejected.`);
-                }
+                // 3. Write to Firestore (Real-time listener will handle UI update)
+                // Now using globally exposed functions: window.collection and window.EXPENSES_COLLECTION
+                const expensesCollectionRef = window.collection(window.db, window.EXPENSES_COLLECTION);
+                await window.addDoc(expensesCollectionRef, newExpenseData);
                 
-                // Update UI for manager view
-                renderManagerApprovals();
-                // Update UI for employee view (to be handled by Firestore snapshot later)
-                if (userRole === 'Admin') renderEmployeeDashboard(); // Admin can see all, so refresh dashboard
-
+                // 4. Update UI and provide feedback
+                document.getElementById('expense-form').reset();
+                window.showModal('Success!', `Expense claim submitted successfully for approval. Value: $${base_amount.toFixed(2)} USD.`);
+            } catch (e) {
+                console.error("Error submitting expense:", e);
+                window.showModal('Submission Failed', `An error occurred: ${e.message}. Please try again.`);
+            } finally {
+                submitText.textContent = 'Submit Claim';
+                submitSpinner.classList.add('hidden');
+                submitBtn.disabled = false;
             }
         };
 
-        window.switchUser = (newUserId) => {
-            currentUserId = newUserId;
-            // Re-run the core update logic to refresh the view for the new user
-            updateUI(); 
+        window.handleApproval = async (expenseId, newStatus, event) => {
+             const approvalBtn = event.target;
+             approvalBtn.disabled = true;
+             approvalBtn.textContent = '...';
+
+            try {
+                // Get reference to the specific document
+                // Now using globally exposed functions: window.doc and window.EXPENSES_COLLECTION
+                const expenseDocRef = window.doc(window.db, window.EXPENSES_COLLECTION, expenseId);
+                
+                // Update the document status in Firestore
+                await window.updateDoc(expenseDocRef, {
+                    status: newStatus,
+                    approvedBy: currentUserId,
+                    approvalDate: new Date().toISOString()
+                });
+
+                window.showModal(`Expense ${newStatus}`, `Claim #${expenseId.substring(0, 8)}... has been ${newStatus}.`);
+                // The onSnapshot listener will automatically call calculateBaseAmounts and update the UI
+            } catch (e) {
+                console.error(`Error ${newStatus}ing expense:`, e);
+                window.showModal('Action Failed', `Failed to update expense status: ${e.message}`);
+            } finally {
+                 // Re-enable button (though the UI will refresh instantly anyway)
+                 approvalBtn.disabled = false;
+                 approvalBtn.textContent = newStatus;
+            }
         };
+
 
         // --- Initialization ---
 
-        const populateUserSelector = () => {
-            const selector = document.getElementById('user-selector');
-            selector.innerHTML = '';
-            
-            Object.entries(window.demoUsers).forEach(([id, user]) => {
-                const option = document.createElement('option');
-                option.value = id;
-                option.textContent = `${user.name} (${user.role})`;
-                selector.appendChild(option);
-            });
-        };
-
-        // Main setup function called after Firebase auth is ready
-        const setupApplication = async () => {
-            // FIX: Assign static data here to ensure it's loaded after the module script executes
-            allExpenses = Array.isArray(window.staticExpenses) ? window.staticExpenses : [];
-
-            populateUserSelector();
-            // Start the complex, long-running data fetch (currency conversion)
-            await calculateBaseAmounts(); 
+        /**
+         * Main setup function called after Firebase auth is ready and profile is loaded
+         * FIX: Made globally accessible via window to be callable from the module script.
+         */
+        window.setupApplication = async () => {
+             currentUserId = window.getUserId();
+             userProfile = window.demoUsers[currentUserId]; // Use the global demoUsers map
+             
+             // Start the real-time listener. This call will trigger the first data load, 
+             // which in turn calls calculateBaseAmounts and updateUI.
+             // FIX: Called via window to access the function exposed in the module script.
+             window.startExpenseListener();
         };
 
         // Tab switching logic
@@ -691,7 +743,7 @@
                 // Deactivate all
                 document.querySelectorAll('.tab-button').forEach(btn => {
                     btn.classList.remove('border-odoo-green', 'text-odoo-green');
-                    btn.classList.add('text-gray-500');
+                    btn.classList.add('text-gray-500', 'border-transparent');
                 });
                 document.querySelectorAll('.tab-pane').forEach(pane => {
                     pane.classList.add('hidden');
@@ -704,213 +756,11 @@
                 const tabId = this.getAttribute('data-tab');
                 document.getElementById(tabId).classList.remove('hidden');
 
-                // Re-render content when tab is switched (important for dynamic data)
-                if (tabId === 'dashboard' && userRole !== 'Manager') renderEmployeeDashboard();
-                if (tabId === 'manager') renderManagerApprovals();
-                if (tabId === 'admin') renderAdminConfig();
+                // Re-render content when tab is switched (uses latest global data)
+                renderContent();
             });
         });
 
     </script>
-</body>
-</html>
-<td class="px-3 py-3 whitespace-nowrap text-center space-x-2">
-                                        <button onclick="window.handleApproval('${expense.id}', 'Approved')" 
-                                            class="bg-green-500 hover:bg-green-600 text-white p-2 rounded-lg text-xs font-semibold shadow-sm">
-                                            Approve
-                                        </button>
-                                        <button onclick="window.handleApproval('${expense.id}', 'Rejected')" 
-                                            class="bg-red-500 hover:bg-red-600 text-white p-2 rounded-lg text-xs font-semibold shadow-sm">
-                                            Reject
-                                        </button>
-                                    </td>
-                    </tr>
-                `;
-                listEl.innerHTML += row;
-            });
-        };
-
-        const renderAdminConfig = () => {
-            const listEl = document.getElementById('admin-user-list');
-            listEl.innerHTML = '';
-
-            Object.entries(window.demoUsers).forEach(([id, user]) => {
-                const userDiv = document.createElement('div');
-                userDiv.className = 'flex justify-between items-center p-3 bg-gray-50 rounded-lg border border-gray-100';
-                userDiv.innerHTML = `
-                    <span class="font-medium text-gray-800">${user.name}</span>
-                    <span class="text-sm font-bold text-odoo-green">${user.role}</span>
-                `;
-                listEl.appendChild(userDiv);
-            });
-        };
-
-        // --- Event Handlers and Main Logic ---
-
-        /**
-         * Main setup function called after Firebase/Auth readiness.
-         */
-        const setupApplication = async () => {
-            // 1. Populate User Selector
-            const selector = document.getElementById('user-selector');
-            for (const [id, user] of Object.entries(window.demoUsers)) {
-                const option = document.createElement('option');
-                option.value = id;
-                option.textContent = `${user.name} (${user.role})`;
-                selector.appendChild(option);
-            }
-
-            // 2. Load Demo Data
-            // NOTE: In a real app, Firestore snapshot listeners would update 'allExpenses'
-            allExpenses = [...window.staticExpenses]; // Use spread operator to avoid modifying static data
-
-            // 3. Calculate Base Amounts for all initial expenses
-            await calculateBaseAmounts();
-            
-            // 4. Initialize Tabs
-            document.querySelectorAll('.tab-button').forEach(button => {
-                button.addEventListener('click', (e) => {
-                    // De-activate all tabs
-                    document.querySelectorAll('.tab-button').forEach(btn => {
-                        btn.classList.remove('text-odoo-green', 'border-odoo-green');
-                        btn.classList.add('text-gray-500', 'hover:text-gray-700');
-                    });
-                    // Hide all panes
-                    document.querySelectorAll('.tab-pane').forEach(pane => {
-                        pane.classList.add('hidden');
-                    });
-
-                    // Activate selected tab and show its pane
-                    const tab = e.target.dataset.tab;
-                    e.target.classList.add('text-odoo-green', 'border-odoo-green');
-                    e.target.classList.remove('text-gray-500', 'hover:text-gray-700');
-                    document.getElementById(tab).classList.remove('hidden');
-                    
-                    // Re-render content specific to the tab for up-to-date data
-                    if (tab === 'dashboard') renderEmployeeDashboard();
-                    if (tab === 'manager') renderManagerApprovals();
-                    if (tab === 'admin') renderAdminConfig();
-                });
-            });
-
-            // 5. Initial UI Render
-            updateUI();
-        };
-
-        /**
-         * Switches the currently active user and updates the UI.
-         * @param {string} newUserId - The ID of the user to switch to.
-         */
-        window.switchUser = (newUserId) => {
-            currentUserId = newUserId;
-            // Re-evaluate role and re-render everything
-            updateUI();
-        };
-
-
-        /**
-         * Handles the submission of a new expense claim.
-         */
-        window.submitExpense = async (event) => {
-            event.preventDefault();
-            const submitButton = document.getElementById('submit-button');
-            const submitText = document.getElementById('submit-text');
-            const submitSpinner = document.getElementById('submit-spinner');
-
-            submitButton.disabled = true;
-            submitText.textContent = 'Submitting...';
-            submitSpinner.classList.remove('hidden');
-
-            try {
-                const date = document.getElementById('exp-date').value;
-                const category = document.getElementById('exp-category').value;
-                const description = document.getElementById('exp-description').value;
-                const original_amount = parseFloat(document.getElementById('exp-amount').value);
-                const original_currency = document.getElementById('exp-currency').value;
-                
-                // 1. Get user and manager info
-                const user = window.demoUsers[currentUserId];
-                const approverId = user.managerId || window.userManagerId;
-
-                // 2. Fetch exchange rate and calculate base amount
-                const rate = await window.fetchExchangeRate(original_currency, window.companyBaseCurrency);
-                let base_amount = original_amount;
-                if (original_currency !== window.companyBaseCurrency) {
-                    base_amount = Math.round(original_amount * rate * 100) / 100;
-                }
-
-                // 3. Create new expense object
-                const newExpense = {
-                    id: `exp-${Date.now()}`, // Simple unique ID for demo
-                    userId: currentUserId,
-                    userName: user.name,
-                    date,
-                    description,
-                    category,
-                    original_amount,
-                    original_currency,
-                    base_amount,
-                    status: 'Pending', // New expenses start as Pending
-                    approverId: approverId
-                };
-
-                // 4. Save (in-memory for demo, would be Firebase here)
-                allExpenses.push(newExpense);
-
-                // 5. Success feedback and reset
-                window.showModal('Success! 🚀', 'Your expense claim has been submitted for approval.');
-                document.getElementById('expense-form').reset();
-                
-                // Re-render the dashboard to show the new expense
-                renderEmployeeDashboard(); 
-
-            } catch (error) {
-                console.error("Expense submission failed:", error);
-                window.showModal('Submission Failed', `An error occurred while submitting: ${error.message}`);
-            } finally {
-                submitButton.disabled = false;
-                submitText.textContent = 'Submit Claim';
-                submitSpinner.classList.add('hidden');
-            }
-        };
-
-        /**
-         * Handles the approval or rejection of an expense by a Manager.
-         * @param {string} expenseId - The ID of the expense to update.
-         * @param {('Approved'|'Rejected')} status - The new status.
-         */
-        window.handleApproval = (expenseId, status) => {
-            const expenseIndex = allExpenses.findIndex(e => e.id === expenseId);
-
-            if (expenseIndex !== -1) {
-                const expense = allExpenses[expenseIndex];
-                
-                // Simple check to prevent double-approval/rejection
-                if (expense.status === status) {
-                    window.showModal('Status Error', `Expense is already **${status}**.`);
-                    return;
-                }
-
-                // Update the status in the in-memory array
-                allExpenses[expenseIndex] = {
-                    ...expense,
-                    status: status
-                };
-                
-                window.showModal('Action Complete', `Expense for **${expense.userName}** has been **${status}**.`);
-                
-                // Re-render the Manager Approvals list to remove the processed item
-                renderManagerApprovals();
-                // Re-render the Employee Dashboard so the employee can see the update
-                renderEmployeeDashboard();
-
-            } else {
-                window.showModal('Error', 'Expense not found.');
-            }
-        };
-
-        // Ensure setupApplication is defined before it's called inside onAuthStateChanged or the fallback
-        window.setupApplication = setupApplication;
-    </script>
 </body>
 </html>
