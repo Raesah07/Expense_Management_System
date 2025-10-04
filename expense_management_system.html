@@ -3,475 +3,515 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Simple Expense Manager (Dynamic Users)</title>
+    <title>Expense Management System (Dynamic Data Ready)</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
         body { font-family: 'Inter', sans-serif; }
-        .modal { background-color: rgba(0, 0, 0, 0.5); display: none; }
+        .view { display: none; }
+        .view.active { display: block; }
+        .modal { background-color: rgba(0, 0, 0, 0.5); }
+        .card { border-radius: 1.5rem; } /* Custom class for rounded cards */
     </style>
 </head>
 <body class="bg-stone-50 text-stone-800">
 
-    <header class="bg-green-700 text-white p-4 shadow-lg flex justify-between items-center">
-        <h1 class="text-2xl font-bold">Simple Expense Manager (API Ready)</h1>
-        <div class="flex items-center space-x-4">
-            <span id="user-info" class="text-sm">User: Select Role | Role: NONE</span>
-            <button onclick="showRoleSelection()" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg shadow transition duration-150">Change Role</button>
-        </div>
-    </header>
-
-    <div id="app" class="min-h-screen p-8">
-        </div>
-
-    <div id="role-selection-modal" class="modal fixed inset-0 z-50 flex items-center justify-center">
-        <div class="bg-white p-6 rounded-xl shadow-2xl w-full max-w-md">
-            <h2 class="text-xl font-bold mb-4 border-b pb-2">Select User Role to Begin</h2>
-            <div id="user-list" class="space-y-3 max-h-96 overflow-y-auto pr-2">
-                <p class="text-center text-gray-500">Loading users...</p>
+    <div id="app" class="min-h-screen">
+        <header class="bg-green-700 shadow-lg text-white p-4 flex justify-between items-center sticky top-0 z-10">
+            <h1 class="text-2xl font-bold">Simple Expense Manager (API Ready)</h1>
+            
+            <div class="flex items-center space-x-4">
+                <span id="user-info" class="text-sm font-semibold text-stone-100">Please select your user role to begin.</span>
+                <button id="role-change-btn" onclick="openModal('role-modal')" class="bg-white text-green-700 px-3 py-1 rounded-full font-semibold shadow-md hover:bg-green-100 transition duration-150 flex items-center">
+                    <i data-lucide="refresh-cw" class="w-4 h-4 mr-1"></i> Change Role
+                </button>
             </div>
-            <p class="mt-4 text-xs text-gray-500 border-t pt-2">
-                <button onclick="showUserManagementModal()" class="text-blue-600 hover:underline">Manage Users (Create/Delete)</button>
-            </p>
+        </header>
+
+        <main class="p-6 max-w-5xl mx-auto">
+            
+            <div id="employee-view" class="view">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 pt-4">
+                    <h2 class="text-3xl font-semibold text-green-700 mb-4 sm:mb-0">My Expense Claims</h2>
+                    <button id="new-claim-btn" onclick="openModal('expense-modal')" class="bg-indigo-600 text-white px-5 py-2 card font-semibold shadow-lg hover:bg-indigo-700 transition duration-150 flex items-center w-full sm:w-auto">
+                        <i data-lucide="receipt" class="w-5 h-5 mr-2"></i> Submit New Claim
+                    </button>
+                </div>
+                <div class="bg-white p-6 card shadow-xl overflow-x-auto">
+                    <table class="min-w-full text-left text-sm font-light">
+                        <thead class="border-b font-medium bg-stone-50">
+                            <tr>
+                                <th scope="col" class="px-6 py-3">Date</th>
+                                <th scope="col" class="px-6 py-3">Description</th>
+                                <th scope="col" class="px-6 py-3">Category</th>
+                                <th scope="col" class="px-6 py-3 text-right">Amount</th>
+                                <th scope="col" class="px-6 py-3 text-center">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="employee-expense-table">
+                            <tr><td colspan="5" class="text-center py-4 text-stone-500">Please select a user role.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="manager-view" class="view">
+                <h2 class="text-3xl font-semibold text-green-700 mb-6 pt-4">Approval Queue</h2>
+
+                <div class="bg-white p-6 card shadow-xl overflow-x-auto">
+                    <h3 class="text-xl font-bold mb-4 flex items-center text-amber-700">
+                        <i data-lucide="alert-triangle" class="w-5 h-5 mr-2"></i> Pending Approvals
+                    </h3>
+                    <table class="min-w-full text-left text-sm font-light">
+                        <thead class="border-b font-medium bg-stone-50">
+                            <tr>
+                                <th scope="col" class="px-6 py-3">Employee</th>
+                                <th scope="col" class="px-6 py-3">Date</th>
+                                <th scope="col" class="px-6 py-3">Description</th>
+                                <th scope="col" class="px-6 py-3 text-right">USD Equivalent</th>
+                                <th scope="col" class="px-6 py-3 text-center">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="manager-approval-table">
+                            <tr><td colspan="5" class="text-center py-4 text-stone-500">Please select a manager role.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="admin-view" class="view">
+                <h2 class="text-3xl font-semibold text-green-700 mb-6 pt-4">Admin Console (API Ready)</h2>
+                
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div class="bg-white p-6 card shadow-xl text-center border-b-4 border-indigo-500">
+                        <p class="text-sm text-stone-500">Total Claims</p>
+                        <p id="admin-total-claims" class="text-4xl font-extrabold text-indigo-600 mt-2">...</p>
+                    </div>
+                    <div class="bg-white p-6 card shadow-xl text-center border-b-4 border-green-500">
+                        <p class="text-sm text-stone-500">Approved Spend (USD)</p>
+                        <p id="admin-approved-spend" class="text-4xl font-extrabold text-green-600 mt-2">...</p>
+                    </div>
+                    <div class="bg-white p-6 card shadow-xl text-center border-b-4 border-amber-500">
+                        <p class="text-sm text-stone-500">Pending Approvals</p>
+                        <p id="admin-pending-count" class="text-4xl font-extrabold text-amber-600 mt-2">...</p>
+                    </div>
+                </div>
+
+                <div class="mt-8 p-6 bg-stone-100 card shadow-inner border border-stone-200">
+                    <p class="text-lg font-semibold text-stone-700 flex items-center">
+                        <i data-lucide="settings" class="w-5 h-5 mr-2 text-indigo-500"></i> System Status
+                    </p>
+                    <p class="text-sm text-stone-600 mt-2">This view now attempts to fetch aggregate data from the backend API: <code class="text-sm text-indigo-600">/api/admin/summary</code>.</p>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <div id="expense-modal" class="modal fixed inset-0 hidden items-center justify-center p-4 z-50 transition duration-300">
+        <div class="bg-white p-8 card shadow-2xl w-full max-w-lg">
+            <div class="flex justify-between items-center mb-6 border-b pb-3">
+                <h3 class="text-2xl font-bold text-green-700">Submit New Expense Claim</h3>
+                <button onclick="closeModal('expense-modal')" class="text-stone-400 hover:text-stone-600">
+                    <i data-lucide="x" class="w-6 h-6"></i>
+                </button>
+            </div>
+            <form id="expense-form" class="space-y-4">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label for="date" class="block text-sm font-medium text-stone-700 mb-1">Date</label>
+                        <input type="date" id="date" name="date" required class="w-full p-2 border border-stone-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500">
+                    </div>
+                    <div>
+                        <label for="category" class="block text-sm font-medium text-stone-700 mb-1">Category</label>
+                        <select id="category" name="category" required class="w-full p-2 border border-stone-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 bg-white">
+                            <option value="">Select Category</option>
+                            <option value="Travel">Travel</option>
+                            <option value="Meals">Meals</option>
+                            <option value="Office Supplies">Office Supplies</option>
+                            <option value="Software">Software/Subscriptions</option>
+                            <option value="Other">Other</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div>
+                    <label for="description" class="block text-sm font-medium text-stone-700 mb-1">Description</label>
+                    <textarea id="description" name="description" rows="2" required class="w-full p-2 border border-stone-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"></textarea>
+                </div>
+
+                <div class="grid grid-cols-3 gap-4">
+                    <div class="col-span-2">
+                        <label for="amount" class="block text-sm font-medium text-stone-700 mb-1">Amount</label>
+                        <input type="number" id="amount" name="amount" step="0.01" min="0.01" required class="w-full p-2 border border-stone-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500">
+                    </div>
+                    <div>
+                        <label for="currency" class="block text-sm font-medium text-stone-700 mb-1">Currency</label>
+                        <select id="currency" name="currency" required class="w-full p-2 border border-stone-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 bg-white">
+                            <option value="USD">USD</option>
+                            <option value="EUR">EUR</option>
+                            <option value="GBP">GBP</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="pt-4 flex justify-end space-x-3">
+                    <button type="button" onclick="closeModal('expense-modal')" class="px-4 py-2 text-stone-600 bg-stone-100 card font-semibold hover:bg-stone-200 transition duration-150">
+                        Cancel
+                    </button>
+                    <button type="submit" id="submit-expense-btn" class="px-6 py-2 bg-green-600 text-white card font-semibold shadow-md hover:bg-green-700 transition duration-150 flex items-center">
+                        Submit Claim
+                    </button>
+                </div>
+            </form>
         </div>
     </div>
     
-    <div id="user-management-modal" class="modal fixed inset-0 z-50 flex items-center justify-center">
-        <div class="bg-white p-6 rounded-xl shadow-2xl w-full max-w-xl">
-            <h2 class="text-xl font-bold mb-4 border-b pb-2">Manage Users</h2>
-
-            <div class="mb-6 p-4 border rounded-lg bg-gray-50">
-                <h3 class="font-semibold mb-2">Create New User</h3>
-                <input id="new-user-name" type="text" placeholder="Enter Name" class="p-2 border rounded w-1/2 mr-2">
-                <select id="new-user-role" class="p-2 border rounded mr-2">
-                    <option value="Employee">Employee</option>
-                    <option value="Manager">Manager</option>
-                    <option value="Admin">Admin</option>
-                </select>
-                <button onclick="createUser()" class="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg transition duration-150">Create</button>
+    <div id="role-modal" class="modal fixed inset-0 flex items-center justify-center p-4 z-50 transition duration-300">
+        <div class="bg-white p-8 card shadow-2xl w-full max-w-md">
+            <h3 class="text-2xl font-bold mb-6 text-indigo-700 border-b pb-2">Select User Role to Begin</h3>
+            <div class="space-y-4" id="role-selector-container">
+                <button onclick="switchRole(1); closeModal('role-modal')" class="w-full text-left p-4 bg-red-50 hover:bg-red-100 card border border-red-200 transition duration-150">
+                    <p class="font-bold text-red-700 flex items-center capitalize"><i data-lucide="bar-chart-3" class="w-5 h-5 mr-2"></i> admin (Admin User)</p>
+                    <p class="text-sm text-red-600 mt-1">View overall system summary.</p>
+                </button>
+                <button onclick="switchRole(4); closeModal('role-modal')" class="w-full text-left p-4 bg-amber-50 hover:bg-amber-100 card border border-amber-200 transition duration-150">
+                    <p class="font-bold text-amber-700 flex items-center capitalize"><i data-lucide="briefcase" class="w-5 h-5 mr-2"></i> manager (Jane Smith)</p>
+                    <p class="text-sm text-amber-600 mt-1">Approve/reject team expenses.</p>
+                </button>
+                <button onclick="switchRole(2); closeModal('role-modal')" class="w-full text-left p-4 bg-indigo-50 hover:bg-indigo-100 card border border-indigo-200 transition duration-150">
+                    <p class="font-bold text-indigo-700 flex items-center capitalize"><i data-lucide="user" class="w-5 h-5 mr-2"></i> employee (Eleanor Vance)</p>
+                    <p class="text-sm text-indigo-600 mt-1">View personal expenses and submit new claims.</p>
+                </button>
+                <button onclick="switchRole(3); closeModal('role-modal')" class="w-full text-left p-4 bg-indigo-50 hover:bg-indigo-100 card border border-indigo-200 transition duration-150">
+                    <p class="font-bold text-indigo-700 flex items-center capitalize"><i data-lucide="user" class="w-5 h-5 mr-2"></i> employee (Marcus Holloway)</p>
+                    <p class="text-sm text-indigo-600 mt-1">View personal expenses and submit new claims.</p>
+                </button>
             </div>
-
-            <div class="max-h-60 overflow-y-auto pr-2">
-                <h3 class="font-semibold mb-2">Existing Users (Cannot delete users with claims)</h3>
-                <div id="existing-users-list" class="space-y-1">
-                    <p class="text-center text-gray-500">Loading...</p>
-                </div>
-            </div>
-
-            <button onclick="closeUserManagementModal()" class="mt-4 bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-lg transition duration-150">Close</button>
+            <p class="text-xs text-stone-500 mt-4">Note: User selection simulates receiving user data from the API: <code class="text-sm text-red-600">/api/login/{userId}</code></p>
+        </div>
+    </div>
+    
+    <div id="status-message-modal" class="modal fixed inset-0 hidden items-center justify-center z-50 transition duration-300">
+        <div class="bg-white p-6 rounded-xl shadow-2xl max-w-sm text-center">
+            <div id="status-icon" class="mb-3"></div>
+            <p id="status-title" class="text-xl font-bold mb-2"></p>
+            <p id="status-message" class="text-sm text-stone-600"></p>
+            <button onclick="closeModal('status-message-modal')" class="mt-4 px-4 py-2 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700">OK</button>
         </div>
     </div>
 
-    <div id="claim-modal" class="modal fixed inset-0 z-50 flex items-center justify-center">
-        <div class="bg-white p-6 rounded-xl shadow-2xl w-full max-w-md">
-            <h2 class="text-xl font-bold mb-4 border-b pb-2">Submit New Expense Claim</h2>
-            <label class="block mb-2">Description</label>
-            <input id="claim-description" type="text" class="w-full p-2 border rounded mb-3" required>
-            
-            <label class="block mb-2">Category</label>
-            <select id="claim-category" class="w-full p-2 border rounded mb-3">
-                <option value="Meals">Meals</option>
-                <option value="Travel">Travel</option>
-                <option value="Office Supplies">Office Supplies</option>
-                <option value="Software">Software</option>
-            </select>
-            
-            <div class="flex space-x-3 mb-3">
-                <div class="w-1/2">
-                    <label class="block mb-2">Amount</label>
-                    <input id="claim-amount" type="number" step="0.01" class="w-full p-2 border rounded" required>
-                </div>
-                <div class="w-1/2">
-                    <label class="block mb-2">Currency</label>
-                    <select id="claim-currency" class="w-full p-2 border rounded">
-                        <option value="USD">USD</option>
-                        <option value="EUR">EUR</option>
-                        <option value="GBP">GBP</option>
-                    </select>
-                </div>
-            </div>
+    <script type="text/javascript">
+        window.addEventListener('load', () => lucide.createIcons());
 
-            <div class="flex justify-end space-x-3">
-                <button onclick="closeClaimModal()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-lg transition duration-150">Cancel</button>
-                <button onclick="submitClaim()" class="bg-green-700 hover:bg-green-800 text-white font-bold py-2 px-4 rounded-lg transition duration-150">Submit</button>
-            </div>
-        </div>
-    </div>
+        // --- GLOBAL STATE & CONFIGURATION ---
+        const API_BASE_URL = 'http://localhost:3000/api'; // *** CHANGE THIS TO YOUR BACKEND URL ***
+        let currentUser = null; // Stores the user object { id, name, role, managerId }
+        let currentView = null; 
+
+        // Mock role data used only for the *initial* role selector buttons. 
+        // In a real app, this would be a login/authentication process.
+        window.allUserRoles = [
+            { id: 1, name: 'Admin User', role: 'admin', managerId: null },
+            { id: 2, name: 'Eleanor Vance', role: 'employee', managerId: 4 },
+            { id: 3, name: 'Marcus Holloway', role: 'employee', managerId: 4 },
+            { id: 4, name: 'Jane Smith', role: 'manager', managerId: 1 },
+        ];
 
 
-    <script>
-        const API_BASE_URL = 'http://localhost:3000/api';
-        let currentUser = null; // userId, employeeName, role
-        
-        document.addEventListener('DOMContentLoaded', () => {
-            // Check if user info is in localStorage (for persistence)
-            const savedUser = localStorage.getItem('currentUser');
-            if (savedUser) {
-                currentUser = JSON.parse(savedUser);
-                updateUserInfo();
-                renderView(currentUser.role);
-            } else {
-                showRoleSelection();
-            }
-        });
-        
         // --- UTILITY FUNCTIONS ---
-        async function fetchData(endpoint, options = {}) {
-            try {
-                const response = await fetch(`${API_BASE_URL}${endpoint}`, options);
-                if (!response.ok) {
-                    // Check if response body has JSON error message
-                    const errorData = await response.json().catch(() => ({ message: `HTTP error! status: ${response.status}` }));
-                    throw new Error(errorData.message);
-                }
-                return await response.json();
-            } catch (error) {
-                console.error("API Error:", error);
-                document.getElementById('app').innerHTML = `<p class="text-red-600 text-center mt-8">API Error: Failed to fetch data from ${API_BASE_URL}. Ensure server.js is running. Details: ${error.message}</p>`;
-                return null;
-            }
-        }
+        const getStatusBadge = (status) => {
+            const colors = {
+                'Approved': 'bg-green-100 text-green-800',
+                'Pending': 'bg-amber-100 text-amber-800',
+                'Rejected': 'bg-red-100 text-red-800',
+            };
+            return `<span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${colors[status] || 'bg-stone-100 text-stone-800'}">${status}</span>`;
+        };
         
-        function updateUserInfo() {
-            if (currentUser) {
-                document.getElementById('user-info').textContent = `User: ${currentUser.employeeName} | Role: ${currentUser.role.toUpperCase()}`;
-                localStorage.setItem('currentUser', JSON.stringify(currentUser));
-            } else {
-                document.getElementById('user-info').textContent = 'User: Select Role | Role: NONE';
-                localStorage.removeItem('currentUser');
-            }
-        }
-        
-        function showRoleSelection() {
-            renderUserRoleSelection();
-            document.getElementById('role-selection-modal').style.display = 'flex';
-        }
-        
-        function closeRoleSelection() {
-            document.getElementById('role-selection-modal').style.display = 'none';
-        }
-        
-        // --- VIEW RENDERING FUNCTIONS ---
-        function renderView(role) {
-            const app = document.getElementById('app');
-            app.innerHTML = '';
+        function showStatusMessage(title, message, type = 'green') {
+            // ... (Keep this utility function as is) ...
+            const modal = document.getElementById('status-message-modal');
+            const iconDiv = document.getElementById('status-icon');
+            const titleEl = document.getElementById('status-title');
+            const messageEl = document.getElementById('status-message');
+            const okBtn = modal.querySelector('button');
+
+            const colorMap = {
+                'green': { icon: 'check-circle', color: 'text-green-600', btn: 'bg-green-600 hover:bg-green-700' },
+                'red': { icon: 'x-circle', color: 'text-red-600', btn: 'bg-red-600 hover:bg-red-700' },
+                'amber': { icon: 'alert-triangle', color: 'text-amber-600', btn: 'bg-amber-600 hover:bg-amber-700' }
+            };
+
+            const colors = colorMap[type] || colorMap.green;
+            iconDiv.innerHTML = `<i data-lucide="${colors.icon}" class="w-12 h-12 mx-auto ${colors.color}"></i>`;
+            titleEl.textContent = title;
+            messageEl.textContent = message;
+            okBtn.className = `mt-4 px-4 py-2 text-white rounded-lg font-semibold ${colors.btn}`;
             
-            switch (role) {
-                case 'Employee':
-                    app.innerHTML = `
-                        <div class="mt-8 flex justify-between items-center">
-                            <h2 class="text-3xl font-semibold text-green-700">My Expense Claims</h2>
-                            <button onclick="showClaimModal()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow-md transition duration-150 flex items-center">
-                                <i data-lucide="plus" class="w-5 h-5 mr-2"></i> Submit New Claim
-                            </button>
-                        </div>
-                        <div id="employee-table-container" class="mt-6 bg-white p-6 rounded-xl shadow-lg">
-                            <table class="min-w-full divide-y divide-gray-200">
-                                <thead>
-                                    <tr>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="employee-claims-body" class="bg-white divide-y divide-gray-200">
-                                    <tr><td colspan="5" class="py-4 text-center text-gray-500">Loading claims...</td></tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    `;
-                    renderEmployeeTable();
-                    break;
-                case 'Manager':
-                    app.innerHTML = `
-                        <div class="mt-8">
-                            <h2 class="text-3xl font-semibold text-orange-600">Approval Queue</h2>
-                        </div>
-                        <div id="manager-table-container" class="mt-6 bg-white p-6 rounded-xl shadow-lg">
-                            <h3 class="text-xl font-medium text-orange-600 mb-4 flex items-center">
-                                <i data-lucide="alert-triangle" class="w-6 h-6 mr-2"></i> Pending Approvals
-                            </h3>
-                            <table class="min-w-full divide-y divide-gray-200">
-                                <thead>
-                                    <tr>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Employee</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">USD Equivalent</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="manager-claims-body" class="bg-white divide-y divide-gray-200">
-                                    <tr><td colspan="5" class="py-4 text-center text-gray-500">Loading claims...</td></tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    `;
-                    renderManagerApprovals();
-                    break;
-                case 'Admin':
-                    // Admin view (simplified as no backend for summary was built)
-                    app.innerHTML = `
-                        <div class="mt-8">
-                            <h2 class="text-3xl font-semibold text-red-700">Admin Dashboard</h2>
-                        </div>
-                        <div class="mt-6 p-6 bg-white rounded-xl shadow-lg">
-                            <p class="text-lg text-gray-600">Admin View is active. This view would typically contain global reports and configuration settings.</p>
-                        </div>
-                    `;
-                    break;
-                default:
-                    app.innerHTML = '<p class="text-center mt-12 text-gray-500">Please select a user role to begin.</p>';
+            lucide.createIcons();
+            openModal('status-message-modal');
+        }
+
+        function updateUserInfoDisplay() {
+            const user = currentUser;
+            let display = user 
+                ? `User: ${user.name} | Role: ${user.role.toUpperCase()}`
+                : `Please select your user role to begin.`;
+            document.getElementById('user-info').textContent = display;
+        }
+
+        // --- VIEW RENDERERS (NOW ASYNC) ---
+
+        /** * Fetches employee expenses from the API and renders the table.
+         * Endpoint: GET /api/expenses/myclaims 
+         */
+        async function renderEmployeeTable() {
+            const tableBody = document.getElementById('employee-expense-table');
+            if (!currentUser || currentUser.role !== 'employee') return;
+            
+            tableBody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-indigo-500"><i data-lucide="loader-circle" class="w-5 h-5 mr-2 inline animate-spin"></i> Loading personal claims...</td></tr>`;
+            lucide.createIcons();
+
+            try {
+                // In a real app, the API would use the auth token to know the user ID
+                // For this mock structure, we use the user ID in the path
+                const response = await fetch(`${API_BASE_URL}/expenses/myclaims?userId=${currentUser.id}`);
+                
+                if (!response.ok) {
+                    throw new Error(`Error ${response.status}: Failed to fetch expenses.`);
+                }
+                
+                const employeeExpenses = await response.json();
+
+                if (employeeExpenses.length === 0) {
+                    tableBody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-stone-500">No expenses found for ${currentUser.name}. Start by submitting a claim!</td></tr>`;
+                    return;
+                }
+
+                tableBody.innerHTML = employeeExpenses.map(e => `
+                    <tr class="border-b hover:bg-stone-50">
+                        <td class="px-6 py-3">${e.date}</td>
+                        <td class="px-6 py-3">${e.description}</td>
+                        <td class="px-6 py-3">${e.category}</td>
+                        <td class="px-6 py-3 text-right">${e.amount.toFixed(2)} ${e.currency}</td>
+                        <td class="px-6 py-3 text-center">${getStatusBadge(e.status)}</td>
+                    </tr>
+                `).join('');
+
+            } catch (error) {
+                tableBody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-red-500">API Error: ${error.message}</td></tr>`;
             }
-            // Re-initialize Lucide icons
             lucide.createIcons();
         }
-        
-        // --- EXPENSE API CALLS (EXISTING) ---
-        async function renderEmployeeTable() {
-            const claims = await fetchData(`/expenses/myclaims?userId=${currentUser.userId}`);
-            const tbody = document.getElementById('employee-claims-body');
-            tbody.innerHTML = '';
-            
-            if (!claims || claims.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="5" class="py-4 text-center text-gray-500">No claims submitted yet.</td></tr>';
-                return;
-            }
-            
-            claims.forEach(claim => {
-                const row = tbody.insertRow();
-                row.className = 'whitespace-nowrap';
-                row.insertCell().textContent = claim.date;
-                row.insertCell().textContent = claim.description;
-                row.insertCell().textContent = claim.category;
-                row.insertCell().textContent = `${claim.currency} ${claim.amount.toFixed(2)}`;
-                row.insertCell().innerHTML = `<span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusClass(claim.status)}">${claim.status}</span>`;
-            });
-        }
-        
+
+
+        /** * Fetches pending claims for the current manager's team.
+         * Endpoint: GET /api/expenses/pending?managerId={id}
+         */
         async function renderManagerApprovals() {
-            // NOTE: Manager ID is hardcoded as 4 for Jane Smith in server.js's MANAGED_EMPLOYEES list
-            const pendingClaims = await fetchData(`/expenses/pending?managerId=4`); 
-            const tbody = document.getElementById('manager-claims-body');
-            tbody.innerHTML = '';
+            const approvalTable = document.getElementById('manager-approval-table');
+            if (!currentUser || currentUser.role !== 'manager') return;
             
-            if (!pendingClaims || pendingClaims.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="5" class="py-4 text-center text-gray-500">No pending claims for your team.</td></tr>';
-                return;
-            }
-            
-            pendingClaims.forEach(claim => {
-                const row = tbody.insertRow();
-                row.className = 'whitespace-nowrap';
-                row.insertCell().textContent = claim.employeeName;
-                row.insertCell().textContent = claim.date;
-                row.insertCell().textContent = claim.description;
-                row.insertCell().textContent = `USD ${claim.usdEquivalent.toFixed(2)}`;
-                
-                const actionCell = row.insertCell();
-                actionCell.className = 'px-6 py-4 space-x-2';
-                actionCell.innerHTML = `
-                    <button onclick="updateClaimStatus('${claim.docId}', 'Approved')" class="text-green-600 hover:text-green-900 font-semibold">Approve</button>
-                    <button onclick="updateClaimStatus('${claim.docId}', 'Rejected')" class="text-red-600 hover:text-red-900 font-semibold ml-2">Reject</button>
-                `;
-            });
-        }
-        
-        async function updateClaimStatus(docId, status) {
-            const payload = { 
-                status: status,
-                approverId: currentUser.userId // Manager's ID
-            };
-            
-            const result = await fetchData(`/expenses/${docId}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            
-            if (result) {
-                renderManagerApprovals(); // Refresh table
-                alert(`Claim ${docId} ${status.toLowerCase()} successfully.`);
-            }
-        }
-        
-        async function submitClaim() {
-            const date = new Date().toISOString().split('T')[0];
-            const description = document.getElementById('claim-description').value;
-            const category = document.getElementById('claim-category').value;
-            const amount = parseFloat(document.getElementById('claim-amount').value);
-            const currency = document.getElementById('claim-currency').value;
-            
-            if (!description || isNaN(amount) || amount <= 0) {
-                alert("Please fill out all fields with valid data.");
-                return;
-            }
-            
-            const payload = {
-                userId: currentUser.userId,
-                employeeName: currentUser.employeeName,
-                date: date,
-                description: description,
-                category: category,
-                amount: amount,
-                currency: currency
-            };
-            
-            const result = await fetchData(`/expenses`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            
-            if (result) {
-                closeClaimModal();
-                renderEmployeeTable();
-                alert("Claim submitted successfully!");
-            }
-        }
+            approvalTable.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-amber-500"><i data-lucide="loader-circle" class="w-5 h-5 mr-2 inline animate-spin"></i> Loading approval queue...</td></tr>`;
+            lucide.createIcons();
 
-        // --- DYNAMIC USER SELECTION AND MANAGEMENT FUNCTIONS (NEW) ---
-        
-        async function renderUserRoleSelection() {
-            const users = await fetchData('/users');
-            const userListDiv = document.getElementById('user-list');
-            userListDiv.innerHTML = '';
-            
-            if (!users || users.length === 0) {
-                userListDiv.innerHTML = '<p class="text-center text-red-500">No users found. Use Manage Users to create one.</p>';
-                return;
-            }
-            
-            users.forEach(user => {
-                const color = user.role === 'Admin' ? 'red' : (user.role === 'Manager' ? 'orange' : 'green');
-                const description = user.role === 'Admin' ? 'View overall system summary.' : 
-                                    (user.role === 'Manager' ? 'Approve/reject team expenses.' : 
-                                    'View personal expenses and submit new claims.');
+            try {
+                // Fetch claims pending for this manager's team
+                const response = await fetch(`${API_BASE_URL}/expenses/pending?managerId=${currentUser.id}`);
 
-                userListDiv.innerHTML += `
-                    <div onclick="selectUser(${user.userId}, '${user.employeeName}', '${user.role}')"
-                         class="p-3 border border-${color}-200 rounded-lg shadow-sm hover:bg-${color}-50 cursor-pointer transition duration-150">
-                        <p class="font-semibold text-lg text-${color}-700">${user.employeeName}</p>
-                        <p class="text-sm text-gray-600">Role: ${user.role} - ${description}</p>
-                    </div>
-                `;
-            });
-        }
-        
-        function selectUser(userId, employeeName, role) {
-            currentUser = { userId, employeeName, role };
-            updateUserInfo();
-            closeRoleSelection();
-            renderView(role);
-        }
-
-        function showUserManagementModal() {
-            document.getElementById('role-selection-modal').style.display = 'none'; 
-            document.getElementById('user-management-modal').style.display = 'flex';
-            renderExistingUsersList();
-        }
-
-        function closeUserManagementModal() {
-            document.getElementById('user-management-modal').style.display = 'none';
-            showRoleSelection(); // Reopen role selection
-        }
-
-        async function renderExistingUsersList() {
-            const users = await fetchData('/users');
-            const listDiv = document.getElementById('existing-users-list');
-            listDiv.innerHTML = '';
-
-            if (!users || users.length === 0) {
-                listDiv.innerHTML = '<p class="text-center text-gray-500">No users found.</p>';
-                return;
-            }
-
-            users.forEach(user => {
-                // System-critical users (1-4) or users with claims cannot be deleted in this proto
-                const isSystemUser = user.userId <= 4; 
-                
-                const deleteButton = isSystemUser 
-                    ? `<span class="text-red-400 text-sm">Cannot Delete (System User)</span>`
-                    : `<button onclick="deleteUser(${user.userId})" class="text-red-600 hover:text-red-800 font-semibold">Delete</button>`;
-
-                listDiv.innerHTML += `
-                    <div class="flex justify-between items-center p-2 border-b">
-                        <span>${user.employeeName} (${user.role})</span>
-                        ${deleteButton}
-                    </div>
-                `;
-            });
-        }
-
-        async function createUser() {
-            const employeeName = document.getElementById('new-user-name').value.trim();
-            const role = document.getElementById('new-user-role').value;
-
-            if (!employeeName) {
-                alert("Please enter a name for the new user.");
-                return;
-            }
-
-            const payload = { employeeName, role };
-
-            const result = await fetchData(`/users`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-
-            if (result && result.userId) {
-                alert(`User ${result.employeeName} created successfully!`);
-                document.getElementById('new-user-name').value = '';
-                renderExistingUsersList(); // Refresh list
-            } else if (result && result.message) {
-                alert(`Error: ${result.message}`);
-            }
-        }
-
-        async function deleteUser(userId) {
-            if (!confirm("Are you sure you want to delete this user? This cannot be undone.")) {
-                return;
-            }
-
-            const result = await fetchData(`/users/${userId}`, {
-                method: 'DELETE'
-            });
-
-            if (result && result.message && result.message.includes('Cannot delete user')) {
-                 alert(`Error: ${result.message}`); // Shows if user has existing claims
-            } else if (result && result.userId) {
-                alert(`User ID ${result.userId} deleted successfully.`);
-                if (currentUser && currentUser.userId === result.userId) {
-                    currentUser = null;
-                    updateUserInfo();
-                    renderView(null); // Clear main view
+                if (!response.ok) {
+                    throw new Error(`Error ${response.status}: Failed to fetch approvals.`);
                 }
-                renderExistingUsersList(); // Refresh list
+
+                const pendingApprovals = await response.json(); // Array of expenses
+
+                if (pendingApprovals.length === 0) {
+                    approvalTable.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-stone-500">No pending approvals! Good job, team.</td></tr>`;
+                } else {
+                    approvalTable.innerHTML = pendingApprovals.map(e => `
+                        <tr class="border-b hover:bg-stone-50">
+                            <td class="px-6 py-3">${e.employeeName || 'N/A'}</td> <td class="px-6 py-3">${e.date}</td>
+                            <td class="px-6 py-3">${e.description}</td>
+                            <td class="px-6 py-3 text-right">
+                                <span class="font-semibold text-green-700">$${e.usdEquivalent ? e.usdEquivalent.toFixed(2) : (e.amount || 0).toFixed(2)}</span> USD
+                            </td>
+                            <td class="px-6 py-3 text-center space-x-2">
+                                <button onclick="handleApproval('${e.docId}', 'Approved')" class="text-green-600 hover:text-green-800 font-medium p-1 rounded-lg">Approve</button>
+                                <button onclick="handleApproval('${e.docId}', 'Rejected')" class="text-red-600 hover:text-red-800 font-medium p-1 rounded-lg">Reject</button>
+                            </td>
+                        </tr>
+                    `).join('');
+                }
+            } catch (error) {
+                approvalTable.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-red-500">API Error: ${error.message}</td></tr>`;
+            }
+            lucide.createIcons();
+        }
+
+        /**
+         * Fetches overall system metrics for the admin view.
+         * Endpoint: GET /api/admin/summary
+         */
+        async function renderAdminSummary() {
+            if (!currentUser || currentUser.role !== 'admin') return;
+
+            document.getElementById('admin-total-claims').textContent = '...';
+            document.getElementById('admin-approved-spend').textContent = '...';
+            document.getElementById('admin-pending-count').textContent = '...';
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/admin/summary`);
+                
+                if (!response.ok) {
+                    throw new Error(`Error ${response.status}: Failed to fetch admin summary.`);
+                }
+                
+                const summary = await response.json();
+
+                document.getElementById('admin-total-claims').textContent = summary.totalClaims || 0;
+                document.getElementById('admin-approved-spend').textContent = '$' + (summary.approvedSpend || 0).toFixed(2);
+                document.getElementById('admin-pending-count').textContent = summary.pendingCount || 0;
+            } catch (error) {
+                showStatusMessage('API Error', `Could not load admin data: ${error.message}`, 'red');
+                document.getElementById('admin-total-claims').textContent = 'N/A';
+                document.getElementById('admin-approved-spend').textContent = 'N/A';
+                document.getElementById('admin-pending-count').textContent = 'N/A';
+            }
+        }
+        
+        // --- VIEW CONTROLLERS ---
+
+        /**
+         * Simulates logging in and receiving a user object from the API.
+         * Endpoint: GET /api/login/{userId}
+         */
+        window.switchRole = async (userId) => {
+            // Find the mock user details (simulating API response)
+            const mockUser = window.allUserRoles.find(u => u.id === userId);
+
+            if (mockUser) {
+                // In a real app, this would be the payload from a successful login API call
+                currentUser = mockUser; 
+                switchView(currentUser.role);
+            } else {
+                showStatusMessage('Error', 'User ID not found in mock list.', 'red');
+            }
+        }
+        
+        // Switches the active view tab and triggers data loading
+        window.switchView = (viewName) => {
+            currentView = viewName; // Update current view state
+
+            document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+            const targetView = document.getElementById(`${viewName}-view`);
+            if (targetView) targetView.classList.add('active');
+
+            updateUserInfoDisplay();
+
+            // Call the new async render functions
+            if (viewName === 'employee') {
+                renderEmployeeTable();
+            } else if (viewName === 'manager') {
+                renderManagerApprovals();
+            } else if (viewName === 'admin') {
+                renderAdminSummary();
             }
         }
 
+        // --- API WRITE OPERATIONS (ASYNC) ---
+        
+        /**
+         * Manager action: Approve or Reject
+         * Endpoint: PATCH /api/expenses/{docId}
+         */
+        window.handleApproval = async (docId, newStatus) => {
+            try {
+                const response = await fetch(`${API_BASE_URL}/expenses/${docId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ status: newStatus, approverId: currentUser.id })
+                });
 
-        // --- HELPER MODAL FUNCTIONS (EXISTING) ---
-        function showClaimModal() {
-            document.getElementById('claim-modal').style.display = 'flex';
-        }
-        function closeClaimModal() {
-            document.getElementById('claim-modal').style.display = 'none';
-        }
+                if (!response.ok) {
+                    throw new Error(`Error ${response.status}: Failed to update claim status.`);
+                }
+                
+                // const updatedExpense = await response.json(); // If API returns the updated object
 
-        function getStatusClass(status) {
-            switch (status) {
-                case 'Approved': return 'bg-green-100 text-green-800';
-                case 'Rejected': return 'bg-red-100 text-red-800';
-                case 'Pending':
-                default: return 'bg-yellow-100 text-yellow-800';
+                showStatusMessage('Success', `Expense ${newStatus} successfully sent to the server!`, 'green');
+                renderManagerApprovals(); // Re-fetch the approval queue
+
+            } catch (error) {
+                showStatusMessage('Error', `Approval operation failed: ${error.message}`, 'red');
             }
         }
+        
+        /**
+         * Handles Expense Form Submission
+         * Endpoint: POST /api/expenses
+         */
+        document.getElementById('expense-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const formData = new FormData(e.target);
+            
+            if (!currentUser) {
+                showStatusMessage('Error', 'No user role selected. Please select a role first.', 'red');
+                return;
+            }
+
+            const payload = {
+                userId: currentUser.id,
+                date: formData.get('date'),
+                description: formData.get('description'),
+                category: formData.get('category'),
+                amount: parseFloat(formData.get('amount')),
+                currency: formData.get('currency').toUpperCase(),
+                status: 'Pending', // Server should set this, but included for clarity
+            };
+
+            closeModal('expense-modal');
+            e.target.reset(); // Reset form immediately for good UX
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/expenses`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Error ${response.status}: Failed to submit claim.`);
+                }
+                
+                // const savedExpense = await response.json(); // API would return the saved document
+                
+                showStatusMessage('Success', 'Your expense claim has been submitted successfully to the API!', 'green');
+                
+                // Re-render the current view to show the new claim
+                if (currentView === 'employee') renderEmployeeTable();
+                if (currentView === 'manager') renderManagerApprovals();
+                if (currentView === 'admin') renderAdminSummary();
+
+            } catch (error) {
+                showStatusMessage('Error', `Submission failed: ${error.message}`, 'red');
+            }
+        });
+
+
+        // --- GENERIC MODAL HANDLERS ---
+        window.openModal = (modalId) => { document.getElementById(modalId).classList.replace('hidden', 'flex'); }
+        window.closeModal = (modalId) => { document.getElementById(modalId).classList.replace('flex', 'hidden'); }
+
+        // --- INITIALIZATION ---
+        document.addEventListener('DOMContentLoaded', () => {
+            // Role selection modal opens by default via HTML class (flex)
+            lucide.createIcons();
+        });
     </script>
 
 </body>
 </html>
+
