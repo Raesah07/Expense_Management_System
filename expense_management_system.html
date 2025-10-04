@@ -17,17 +17,28 @@
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, doc, setDoc, addDoc, onSnapshot, getDoc, updateDoc, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Global variables provided by the Canvas environment
+        // Global variables provided by the Canvas environment (with robust safety check)
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        // Ensure firebaseConfig is parsed correctly, providing a fallback for security
-        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        
+        // Safety check for configuration
+        let firebaseConfig = {};
+        let initialAuthToken = null;
+        const hasFirebaseConfig = typeof __firebase_config !== 'undefined' && __firebase_config && __firebase_config.trim() !== '{}';
 
+        if (hasFirebaseConfig) {
+             try {
+                firebaseConfig = JSON.parse(__firebase_config);
+                initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+             } catch (e) {
+                 console.error("Failed to parse Firebase configuration string:", e);
+             }
+        }
+        
         // Global application state variables
         let dbInstance = null;
         let authInstance = null;
         let userId = null;
-        let userProfile = { name: 'Loading', role: 'Employee', managerId: 'manager-1' };
+        let userProfile = { name: 'Local User', role: 'Employee', managerId: 'manager-1' };
         let isAuthReady = false;
         
         // --- Firestore Collection Paths ---
@@ -37,22 +48,49 @@
         // --- Core Authentication and Setup ---
         window.initApp = async () => {
             const spinner = document.getElementById('loading-spinner');
+            const contentArea = document.getElementById('content-area');
             spinner.classList.remove('hidden');
             spinner.classList.add('flex', 'items-center', 'justify-center');
 
             try {
-                // 1. Initialize Firebase
-                if (Object.keys(firebaseConfig).length === 0 || !firebaseConfig.projectId) {
-                     console.error("Firebase config is missing or invalid. Application requires Firestore.");
-                     window.showModal('Error', 'Firebase configuration is missing. Cannot run in real-time mode.');
-                     return;
+                // --- CRITICAL SAFETY CHECK ADDED HERE ---
+                if (!hasFirebaseConfig || Object.keys(firebaseConfig).length === 0 || !firebaseConfig.projectId) {
+                    console.warn("Missing Firebase configuration. Running in Local Mock Mode (no real-time persistence or saving).");
+                    
+                    // Set mock ready state and skip all Firebase calls
+                    userId = 'mock-user-' + Math.random().toString(36).substring(2, 8);
+                    window.db = null; // Important: Null the DB instance
+                    window.getUserId = () => userId;
+                    window.getUserRole = () => userProfile.role;
+                    window.isAuthReady = () => true; 
+                    window.allExpenses = []; // Empty mock expense array
+                    window.demoUsers = {
+                        [userId]: userProfile,
+                        'manager-1': { name: 'Local Manager', role: 'Manager', managerId: null, uid: 'manager-1' }
+                    };
+                    
+                    // Expose mock utilities to prevent errors, but they won't save data
+                    window.collection = (db, path) => ({ db, path }); 
+                    window.addDoc = async () => { 
+                        window.showModal('Local Mode Alert', 'Cannot save expense. Application is running in local mode without Firebase configuration.');
+                        return { id: 'mock-id' };
+                    };
+                    window.updateDoc = async () => console.log('Mock update called.');
+                    window.doc = () => {}; 
+                    window.EXPENSES_COLLECTION = 'mock-collection';
+                    window.startExpenseListener = () => { window.calculateBaseAmounts(); }; 
+
+                    // Update UI immediately
+                    window.setupApplication();
+                    return; 
                 }
-                
+                // --- END OF CRITICAL SAFETY CHECK ---
+
+                // 1. Initialize Firebase (Only runs if config is present)
                 const app = initializeApp(firebaseConfig);
                 dbInstance = getFirestore(app);
                 authInstance = getAuth(app);
                 
-                // Set Firestore logging for debugging
                 setLogLevel('Debug'); 
                 
                 // 2. Authentication
@@ -68,12 +106,10 @@
                 onAuthStateChanged(authInstance, async (user) => {
                     if (user) {
                         userId = user.uid;
-                        
-                        // Wait for profile load before marking ready
                         await fetchOrCreateUserProfile(userId);
                         
                         // 4. Expose all necessary resources to the global window object
-                        window.db = dbInstance; // The key fix: ensure DB instance is exposed
+                        window.db = dbInstance; 
                         window.auth = authInstance;
                         window.getUserId = () => userId;
                         window.getUserRole = () => userProfile.role;
@@ -89,23 +125,25 @@
 
                         // Call the main setup function in the global script
                         window.setupApplication();
-
-                    } else {
-                        console.error("User not authenticated after init.");
-                        // This might happen if token expired, we rely on the anonymous sign-in above.
-                    }
+                    } 
                 });
 
             } catch (error) {
                 console.error("Firebase Initialization or Auth Error:", error);
-                window.showModal('Error', 'Failed to initialize Firebase and authenticate. Check console for details.');
+                // If Firebase init fails, fall back to showing the content with an error message.
+                window.showModal('Fatal Error', 'Failed to initialize Firebase and authenticate. The application will not save data. Check console for details.');
+                
+                // Show content anyway
                 spinner.classList.add('hidden');
                 spinner.classList.remove('flex', 'items-center', 'justify-center');
+                contentArea.classList.remove('hidden');
             }
         };
 
         // --- User Profile Management ---
         const fetchOrCreateUserProfile = async (uid) => {
+            if (!dbInstance) return;
+
             const profileRef = doc(dbInstance, USER_PROFILES_COLLECTION(uid), 'profile');
             const profileSnap = await getDoc(profileRef);
 
@@ -113,7 +151,6 @@
                 userProfile = profileSnap.data();
                 console.log("Profile loaded:", userProfile);
             } else {
-                // Determine a stable default name using the last 4 digits of UID
                 const shortUid = uid.substring(uid.length - 4);
                 userProfile = {
                     name: `User ${shortUid}`,
@@ -121,12 +158,10 @@
                     managerId: 'admin-manager-default', 
                     uid: uid
                 };
-                // Set the default profile (non-blocking)
                 setDoc(profileRef, userProfile).catch(e => console.error("Error setting default profile:", e));
                 console.log("Default profile created:", userProfile);
             }
             
-            // Map users for display in tables
             window.demoUsers = {
                 [uid]: userProfile,
                 'admin-manager-default': { name: 'Default Manager', role: 'Manager', managerId: null, uid: 'admin-manager-default' }
@@ -138,14 +173,14 @@
 
         // --- Firestore Real-time Listener (New Logic) ---
         window.startExpenseListener = () => {
-            if (!dbInstance) {
-                console.error("Firestore database instance not ready yet.");
+            if (!window.db) {
+                // If running in local mode, just calculate and render static content
+                window.calculateBaseAmounts();
                 return;
             }
 
-            const expensesRef = collection(dbInstance, EXPENSES_COLLECTION);
+            const expensesRef = collection(window.db, window.EXPENSES_COLLECTION);
             
-            // FIX: Using onSnapshot for real-time updates
             onSnapshot(expensesRef, (snapshot) => {
                 window.allExpenses = snapshot.docs.map(doc => ({
                     id: doc.id,
@@ -153,8 +188,6 @@
                 }));
                 
                 console.log(`Fetched ${window.allExpenses.length} expenses in real-time.`);
-                
-                // Immediately calculate base amounts and update UI
                 window.calculateBaseAmounts(); 
                 
             }, (error) => {
@@ -175,19 +208,11 @@
         window.allExpenses = [];
         window.demoUsers = {}; 
 
-        // REMOVED: The problematic fetchExchangeRate function and reliance on an external API.
         
         // --- Initial setup function called on window load ---
         window.addEventListener('load', () => {
-             // Only run initApp if we have a Firebase context or config
-             if (typeof __firebase_config !== 'undefined' || Object.keys(firebaseConfig).length > 0) {
-                window.initApp();
-             } else {
-                console.warn("Running in non-Canvas environment without config. Setup skipped.");
-                document.getElementById('loading-spinner').classList.add('hidden');
-                document.getElementById('loading-spinner').classList.remove('flex', 'items-center', 'justify-center');
-                document.getElementById('content-area').classList.remove('hidden');
-             }
+             // We always call initApp now, and the function handles the Firebase check internally
+             window.initApp();
         });
         
     </script>
@@ -377,7 +402,7 @@
 
                     <div id="admin" class="tab-pane hidden">
                         <h2 class="text-2xl font-semibold mb-6 text-odoo-green">Admin Configuration</h2>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        <div class="grid grid-cols-1 md:col-cols-2 gap-8">
                             <!-- User Management Card -->
                             <div class="bg-white p-6 rounded-xl shadow-md">
                                 <h3 class="text-xl font-semibold mb-4 flex items-center"><i data-lucide="users" class="w-5 h-5 mr-2 text-odoo-green"></i> User Roles</h3>
@@ -446,7 +471,13 @@
 
             // 1. Update Header Info
             document.getElementById('user-info').textContent = `${userProfile.name} (${userProfile.role})`;
-            document.getElementById('user-id-display').textContent = `ID: ${currentUserId.substring(0, 8)}...`;
+            
+            // Check if Firebase is active before trying to show full UID
+            if (window.db) {
+                document.getElementById('user-id-display').textContent = `ID: ${currentUserId.substring(0, 8)}...`;
+            } else {
+                 document.getElementById('user-id-display').textContent = `ID: LOCAL`;
+            }
             
             // 2. Hide/Show Role-Specific Tabs
             const managerTab = document.getElementById('manager-tab');
@@ -484,11 +515,8 @@
          * Calculates and sets the base_amount for all expenses using a fixed rate (1.0).
          */
         window.calculateBaseAmounts = () => {
-            const baseCurrency = window.companyBaseCurrency;
-
-            // 1. Update all expenses with calculated base_amount (fixed at 1:1 conversion for stability)
+            // Update all expenses with calculated base_amount (fixed at 1:1 conversion for stability)
             window.allExpenses = window.allExpenses.map(expense => {
-                // Rate is always 1.0 (USD = 1 USD, EUR = 1 USD, etc.) to prevent API dependency block
                 expense.base_amount = expense.original_amount; 
                 return expense;
             });
@@ -593,8 +621,8 @@
         window.submitExpense = async (event) => {
             event.preventDefault();
 
-            // Check if Firebase DB is initialized and ready
-            if (!window.db || !window.isAuthReady()) {
+            // Check if we are ready
+            if (!window.isAuthReady()) {
                 window.showModal('Initialization Error', 'Application is still connecting to the database. Please wait a moment and try again.');
                 return;
             }
@@ -629,13 +657,20 @@
                     submitted_on: new Date().toISOString()
                 };
 
-                // Write to Firestore
-                const expensesCollectionRef = window.collection(window.db, window.EXPENSES_COLLECTION);
-                await window.addDoc(expensesCollectionRef, newExpenseData);
+                if (window.db) {
+                    // Real-time submission
+                    const expensesCollectionRef = window.collection(window.db, window.EXPENSES_COLLECTION);
+                    await window.addDoc(expensesCollectionRef, newExpenseData);
+                    window.showModal('Success!', `Expense claim submitted successfully for approval. Value: $${base_amount.toFixed(2)} USD.`);
+                } else {
+                    // Local Mock Mode: Add to the local array and reset form
+                    window.allExpenses.push({ ...newExpenseData, id: 'mock-' + window.allExpenses.length });
+                    renderContent(); // Rerender to show the new expense in the table
+                    window.showModal('Success (Local Mode)!', `Expense claim submitted to local history. It was NOT saved to the database.`);
+                }
                 
                 // Update UI and provide feedback
                 document.getElementById('expense-form').reset();
-                window.showModal('Success!', `Expense claim submitted successfully for approval. Value: $${base_amount.toFixed(2)} USD.`);
             } catch (e) {
                 console.error("Error submitting expense:", e);
                 window.showModal('Submission Failed', `An error occurred: ${e.message}. Please check console for network errors.`);
@@ -647,7 +682,7 @@
         };
 
         window.handleApproval = async (expenseId, newStatus, event) => {
-            if (!window.db || !window.isAuthReady()) {
+            if (!window.isAuthReady()) {
                 window.showModal('Initialization Error', 'Application is still connecting to the database. Please wait a moment and try again.');
                 return;
             }
@@ -657,22 +692,31 @@
              approvalBtn.textContent = '...';
 
             try {
-                // Get reference to the specific document
-                const expenseDocRef = window.doc(window.db, window.EXPENSES_COLLECTION, expenseId);
+                if (window.db) {
+                    // Real-time update
+                    const expenseDocRef = window.doc(window.db, window.EXPENSES_COLLECTION, expenseId);
+                    await window.updateDoc(expenseDocRef, {
+                        status: newStatus,
+                        approvedBy: currentUserId,
+                        approvalDate: new Date().toISOString()
+                    });
+                    window.showModal(`Expense ${newStatus}`, `Claim #${expenseId.substring(0, 8)}... has been ${newStatus}.`);
+                } else {
+                    // Local Mock Mode: Update the status locally
+                    const expenseIndex = window.allExpenses.findIndex(e => e.id === expenseId);
+                    if (expenseIndex !== -1) {
+                        window.allExpenses[expenseIndex].status = newStatus;
+                        window.allExpenses[expenseIndex].approvedBy = currentUserId;
+                        renderContent(); // Rerender the approval list
+                        window.showModal(`Action Successful (Local Mode)`, `Claim updated to ${newStatus} locally.`);
+                    }
+                }
                 
-                // Update the document status in Firestore
-                await window.updateDoc(expenseDocRef, {
-                    status: newStatus,
-                    approvedBy: currentUserId,
-                    approvalDate: new Date().toISOString()
-                });
-
-                window.showModal(`Expense ${newStatus}`, `Claim #${expenseId.substring(0, 8)}... has been ${newStatus}.`);
             } catch (e) {
                 console.error(`Error ${newStatus}ing expense:`, e);
                 window.showModal('Action Failed', `Failed to update expense status: ${e.message}`);
             } finally {
-                 // The onSnapshot listener handles refreshing the UI, so we just re-enable buttons.
+                 // The onSnapshot listener (or renderContent in mock mode) handles refreshing the UI, so we just re-enable buttons.
                  approvalBtn.disabled = false;
                  approvalBtn.textContent = newStatus;
             }
@@ -682,10 +726,10 @@
         // --- Initialization ---
 
         /**
-         * Main setup function called after Firebase auth is ready and profile is loaded
+         * Main setup function called after Firebase auth is ready or when skipping
          */
         window.setupApplication = async () => {
-             // Start the real-time listener, which handles the final UI rendering.
+             // Start the listener/mock logic, which handles the final UI rendering.
              window.startExpenseListener();
         };
 
