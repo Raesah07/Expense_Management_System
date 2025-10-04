@@ -15,52 +15,38 @@
         .view { display: none; }
         .view.active { display: block; }
         .modal { background-color: rgba(0, 0, 0, 0.5); }
-        .nav-btn { transition: all 0.2s; }
-        .loading-disabled { opacity: 1; pointer-events: auto; } /* Removed loading state check */
+        .card { border-radius: 1.5rem; } /* Custom class for rounded cards */
     </style>
 </head>
-<body class="bg-stone-100 text-stone-800">
+<body class="bg-stone-50 text-stone-800">
 
     <div id="app" class="min-h-screen">
         <!-- Header -->
-        <header class="bg-green-700 shadow-lg text-white p-4 flex justify-between items-center">
-            <h1 class="text-2xl font-bold">Odoo Expense Manager (Client-Side Mock)</h1>
+        <header class="bg-green-700 shadow-lg text-white p-4 flex justify-between items-center sticky top-0 z-10">
+            <h1 class="text-2xl font-bold">Simple Expense Manager (Mock)</h1>
             
             <div class="flex items-center space-x-4">
                 <!-- User Info Display -->
-                <span id="user-info" class="text-sm font-semibold">User: Eleanor Vance | Role: EMPLOYEE</span>
+                <span id="user-info" class="text-sm font-semibold text-stone-100">Please select your user role to begin.</span>
                 <!-- Role Change Button -->
-                <button id="role-change-btn" onclick="openModal('role-modal')" class="bg-white text-green-700 px-3 py-1 rounded-full font-semibold shadow-md hover:bg-green-100 transition duration-150">
-                    Change Role
+                <button id="role-change-btn" onclick="openModal('role-modal')" class="bg-white text-green-700 px-3 py-1 rounded-full font-semibold shadow-md hover:bg-green-100 transition duration-150 flex items-center">
+                    <i data-lucide="refresh-cw" class="w-4 h-4 mr-1"></i> Change Role
                 </button>
             </div>
         </header>
 
-        <!-- Main Navigation -->
-        <nav id="main-nav" class="bg-white shadow-md p-4 flex space-x-4 sticky top-0 z-10">
-            <button id="nav-employee" data-role="employee" onclick="switchView('employee')" class="nav-btn px-4 py-2 rounded-lg text-stone-600 font-medium flex items-center">
-                <i data-lucide="user" class="w-5 h-5 mr-2"></i> Employee Dashboard
-            </button>
-            <button id="nav-manager" data-role="manager" onclick="switchView('manager')" class="nav-btn px-4 py-2 rounded-lg text-stone-600 font-medium flex items-center">
-                <i data-lucide="briefcase" class="w-5 h-5 mr-2"></i> Manager Approvals
-            </button>
-            <button id="nav-admin" data-role="admin" onclick="switchView('admin')" class="nav-btn px-4 py-2 rounded-lg text-stone-600 font-medium flex items-center">
-                <i data-lucide="bar-chart-3" class="w-5 h-5 mr-2"></i> Admin Reports & Setup
-            </button>
-        </nav>
-
-        <!-- Main Content Area -->
-        <main class="p-6">
+        <!-- Main Content Area - Centered and simplified -->
+        <main class="p-6 max-w-5xl mx-auto">
             
             <!-- Employee View -->
             <div id="employee-view" class="view">
-                <div class="flex justify-between items-center mb-6 border-b pb-4">
-                    <h2 class="text-3xl font-semibold text-green-700">My Expense History</h2>
-                    <button id="new-claim-btn" onclick="openModal('expense-modal')" class="bg-indigo-600 text-white px-6 py-2 rounded-xl font-semibold shadow-lg hover:bg-indigo-700 transition duration-150 flex items-center">
-                        <i data-lucide="plus-circle" class="w-5 h-5 mr-2"></i> New Claim
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 pt-4">
+                    <h2 class="text-3xl font-semibold text-green-700 mb-4 sm:mb-0">My Expense Claims</h2>
+                    <button id="new-claim-btn" onclick="openModal('expense-modal')" class="bg-indigo-600 text-white px-5 py-2 card font-semibold shadow-lg hover:bg-indigo-700 transition duration-150 flex items-center w-full sm:w-auto">
+                        <i data-lucide="receipt" class="w-5 h-5 mr-2"></i> Submit New Claim
                     </button>
                 </div>
-                <div class="bg-white p-6 rounded-2xl shadow-xl overflow-x-auto">
+                <div class="bg-white p-6 card shadow-xl overflow-x-auto">
                     <table class="min-w-full text-left text-sm font-light">
                         <thead class="border-b font-medium bg-stone-50">
                             <tr>
@@ -80,98 +66,54 @@
 
             <!-- Manager View -->
             <div id="manager-view" class="view">
-                <h2 class="text-3xl font-semibold text-green-700 mb-6 border-b pb-4">Manager Approval Dashboard</h2>
+                <h2 class="text-3xl font-semibold text-green-700 mb-6 pt-4">Approval Queue</h2>
 
-                <!-- Approval Queue -->
-                <div class="mb-8">
-                    <h3 class="text-2xl font-bold mb-4 flex items-center text-amber-700">
-                        <i data-lucide="clock-3" class="w-6 h-6 mr-2"></i> Awaiting My Approval
+                <!-- Approval Queue Table -->
+                <div class="bg-white p-6 card shadow-xl overflow-x-auto">
+                    <h3 class="text-xl font-bold mb-4 flex items-center text-amber-700">
+                        <i data-lucide="alert-triangle" class="w-5 h-5 mr-2"></i> Pending Approvals
                     </h3>
-                    <div class="bg-white p-6 rounded-2xl shadow-xl overflow-x-auto">
-                        <table class="min-w-full text-left text-sm font-light">
-                            <thead class="border-b font-medium bg-stone-50">
-                                <tr>
-                                    <th scope="col" class="px-6 py-3">Employee</th>
-                                    <th scope="col" class="px-6 py-3">Date</th>
-                                    <th scope="col" class="px-6 py-3">Description</th>
-                                    <th scope="col" class="px-6 py-3 text-right">USD Equivalent</th>
-                                    <th scope="col" class="px-6 py-3 text-center">Action</th>
-                                </tr>
-                            </thead>
-                            <tbody id="manager-approval-table">
-                                <!-- Content rendered by JavaScript -->
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <!-- Team Expense History -->
-                <div>
-                    <h3 class="text-2xl font-bold mb-4 flex items-center text-green-700">
-                        <i data-lucide="history" class="w-6 h-6 mr-2"></i> Team Expense History
-                    </h3>
-                    <div class="bg-white p-6 rounded-2xl shadow-xl overflow-x-auto">
-                        <table class="min-w-full text-left text-sm font-light">
-                            <thead class="border-b font-medium bg-stone-50">
-                                <tr>
-                                    <th scope="col" class="px-6 py-3">Employee</th>
-                                    <th scope="col" class="px-6 py-3">Date</th>
-                                    <th scope="col" class="px-6 py-3">Description</th>
-                                    <th scope="col" class="px-6 py-3 text-right">Amount</th>
-                                    <th scope="col" class="px-6 py-3 text-center">Status</th>
-                                </tr>
-                            </thead>
-                            <tbody id="manager-team-table">
-                                <!-- Content rendered by JavaScript -->
-                            </tbody>
-                        </table>
-                    </div>
+                    <table class="min-w-full text-left text-sm font-light">
+                        <thead class="border-b font-medium bg-stone-50">
+                            <tr>
+                                <th scope="col" class="px-6 py-3">Employee</th>
+                                <th scope="col" class="px-6 py-3">Date</th>
+                                <th scope="col" class="px-6 py-3">Description</th>
+                                <th scope="col" class="px-6 py-3 text-right">USD Equivalent</th>
+                                <th scope="col" class="px-6 py-3 text-center">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="manager-approval-table">
+                            <!-- Content rendered by JavaScript -->
+                        </tbody>
+                    </table>
                 </div>
             </div>
 
             <!-- Admin View -->
             <div id="admin-view" class="view">
-                <h2 class="text-3xl font-semibold text-green-700 mb-6 border-b pb-4">Administration & Reporting</h2>
+                <h2 class="text-3xl font-semibold text-green-700 mb-6 pt-4">Admin Console (Mock Data)</h2>
                 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-                    <div class="bg-white p-6 rounded-2xl shadow-xl">
-                        <h3 class="text-xl font-bold mb-4">Total Expenses by Status</h3>
-                        <canvas id="statusChart"></canvas>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div class="bg-white p-6 card shadow-xl text-center border-b-4 border-indigo-500">
+                        <p class="text-sm text-stone-500">Total Mock Claims</p>
+                        <p id="admin-total-claims" class="text-4xl font-extrabold text-indigo-600 mt-2">0</p>
                     </div>
-                    <div class="bg-white p-6 rounded-2xl shadow-xl">
-                        <h3 class="text-xl font-bold mb-4">Top Spending Categories</h3>
-                        <canvas id="categoryChart"></canvas>
+                    <div class="bg-white p-6 card shadow-xl text-center border-b-4 border-green-500">
+                        <p class="text-sm text-stone-500">Approved Spend (USD)</p>
+                        <p id="admin-approved-spend" class="text-4xl font-extrabold text-green-600 mt-2">$0.00</p>
+                    </div>
+                    <div class="bg-white p-6 card shadow-xl text-center border-b-4 border-amber-500">
+                        <p class="text-sm text-stone-500">Pending Approvals</p>
+                        <p id="admin-pending-count" class="text-4xl font-extrabold text-amber-600 mt-2">0</p>
                     </div>
                 </div>
 
-                <h3 class="text-2xl font-bold text-indigo-600 mb-4 border-b pb-2">Approval Workflow Setup (Mock)</h3>
-                <div class="bg-white p-6 rounded-2xl shadow-xl" id="flow-builder">
-                    <div class="border-l-4 border-indigo-500 pl-4 mb-4 bg-indigo-50 p-3 rounded-lg">
-                        <p class="font-semibold text-indigo-700">Step 1: Submission by Employee</p>
-                        <p class="text-sm">Sends claim to immediate manager.</p>
-                    </div>
-                    <div class="border-l-4 border-amber-500 pl-4 mb-4 bg-amber-50 p-3 rounded-lg">
-                        <p class="font-semibold text-amber-700">Step 2: Manager Review</p>
-                        <p class="text-sm">Required for all claims under $1,000.</p>
-                        <label class="flex items-center mt-2 text-sm text-stone-600">
-                            <input type="checkbox" onchange="toggleConditional(this)" class="rounded text-indigo-600">
-                            <span class="ml-2">Require Finance review if conditional</span>
-                        </label>
-                        <div id="conditional-rules" style="display:none;" class="mt-3 p-3 border border-dashed rounded-lg bg-white">
-                            <p class="text-xs font-medium">Conditional Rules (Finance Review):</p>
-                            <ul class="list-disc list-inside text-xs mt-1">
-                                <li>If amount > $500 AND Category is 'Travel'.</li>
-                            </ul>
-                        </div>
-                    </div>
-                    <div class="border-l-4 border-green-500 pl-4 bg-green-50 p-3 rounded-lg">
-                        <p class="font-semibold text-green-700">Step 3: Auto-Payment</p>
-                        <p class="text-sm">Final approval triggers payment queue.</p>
-                    </div>
-                    
-                    <button onclick="addFlowStep()" class="mt-4 bg-stone-200 text-stone-700 px-4 py-2 rounded-lg font-medium hover:bg-stone-300 transition duration-150 flex items-center">
-                        <i data-lucide="plus" class="w-5 h-5 mr-2"></i> Add New Step
-                    </button>
+                <div class="mt-8 p-6 bg-stone-100 card shadow-inner border border-stone-200">
+                    <p class="text-lg font-semibold text-stone-700 flex items-center">
+                        <i data-lucide="settings" class="w-5 h-5 mr-2 text-indigo-500"></i> System Configuration (Mock)
+                    </p>
+                    <p class="text-sm text-stone-600 mt-2">This dashboard is designed to be clean and responsive across all device sizes, using client-side mock data.</p>
                 </div>
 
             </div>
@@ -180,8 +122,8 @@
     </div>
 
     <!-- Modal for Expense Submission -->
-    <div id="expense-modal" class="modal fixed inset-0 hidden items-center justify-center z-50 transition duration-300">
-        <div class="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-lg">
+    <div id="expense-modal" class="modal fixed inset-0 hidden items-center justify-center p-4 z-50 transition duration-300">
+        <div class="bg-white p-8 card shadow-2xl w-full max-w-lg">
             <div class="flex justify-between items-center mb-6 border-b pb-3">
                 <h3 class="text-2xl font-bold text-green-700">Submit New Expense Claim</h3>
                 <button onclick="closeModal('expense-modal')" class="text-stone-400 hover:text-stone-600">
@@ -189,7 +131,7 @@
                 </button>
             </div>
             <form id="expense-form" class="space-y-4">
-                <div class="grid grid-cols-2 gap-4">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                         <label for="date" class="block text-sm font-medium text-stone-700 mb-1">Date</label>
                         <input type="date" id="date" name="date" required class="w-full p-2 border border-stone-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500">
@@ -228,10 +170,10 @@
                 </div>
 
                 <div class="pt-4 flex justify-end space-x-3">
-                    <button type="button" onclick="closeModal('expense-modal')" class="px-4 py-2 text-stone-600 bg-stone-100 rounded-xl font-semibold hover:bg-stone-200 transition duration-150">
+                    <button type="button" onclick="closeModal('expense-modal')" class="px-4 py-2 text-stone-600 bg-stone-100 card font-semibold hover:bg-stone-200 transition duration-150">
                         Cancel
                     </button>
-                    <button type="submit" id="submit-expense-btn" class="px-6 py-2 bg-green-600 text-white rounded-xl font-semibold shadow-md hover:bg-green-700 transition duration-150 flex items-center">
+                    <button type="submit" id="submit-expense-btn" class="px-6 py-2 bg-green-600 text-white card font-semibold shadow-md hover:bg-green-700 transition duration-150 flex items-center">
                         Submit Claim
                     </button>
                 </div>
@@ -239,10 +181,10 @@
         </div>
     </div>
     
-    <!-- Modal for Role Selection -->
-    <div id="role-modal" class="modal fixed inset-0 hidden items-center justify-center z-50 transition duration-300">
-        <div class="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-md">
-            <h3 class="text-2xl font-bold mb-6 text-indigo-700 border-b pb-2">Select User Role</h3>
+    <!-- Modal for Role Selection (Starts active) -->
+    <div id="role-modal" class="modal fixed inset-0 flex items-center justify-center p-4 z-50 transition duration-300">
+        <div class="bg-white p-8 card shadow-2xl w-full max-w-md">
+            <h3 class="text-2xl font-bold mb-6 text-indigo-700 border-b pb-2">Select User Role to Begin</h3>
             <div class="space-y-4" id="role-selector-container">
                 <!-- Buttons dynamically generated -->
             </div>
@@ -260,9 +202,6 @@
         </div>
     </div>
 
-    <!-- Chart.js Library -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-    
     <script type="text/javascript">
         // Import lucide for icon rendering
         window.addEventListener('load', () => lucide.createIcons());
@@ -284,11 +223,12 @@
         ];
 
         // Mock exchange rates
+        // Example: USD_RATE_MOCK['GBP'] = 1.25 means 1 GBP = 1.25 USD
         window.USD_RATE_MOCK = { 'USD': 1.00, 'EUR': 1.08, 'GBP': 1.25 };
         
         // Initial state
-        window.currentRoleUser = window.allUserRoles.find(r => r.id === 2); // Default to Eleanor (Employee)
-        window.currentView = 'employee';
+        window.currentRoleUser = null; 
+        window.currentView = null; 
 
 
         // --- UTILITY FUNCTIONS ---
@@ -330,7 +270,7 @@
             const user = window.currentRoleUser;
             let display = user 
                 ? `User: ${user.name} | Role: ${user.role.toUpperCase()}`
-                : `User Not Selected`;
+                : `Please select your user role to begin.`;
             document.getElementById('user-info').textContent = display;
         }
 
@@ -343,10 +283,10 @@
                 let color = u.role === 'employee' ? 'indigo' : u.role === 'manager' ? 'amber' : 'red';
                 let icon = u.role === 'employee' ? 'user' : u.role === 'manager' ? 'briefcase' : 'bar-chart-3';
                 let description = u.role === 'employee' ? 'View personal expenses and submit new claims.' : 
-                                  u.role === 'manager' ? 'Approve/reject team expenses.' : 'View overall reports and configure workflows.';
+                                  u.role === 'manager' ? 'Approve/reject team expenses.' : 'View overall summary.';
                 
                 return `
-                    <button onclick="switchRole(${u.id}); closeModal('role-modal')" class="w-full text-left p-4 bg-${color}-50 hover:bg-${color}-100 rounded-xl border border-${color}-200 transition duration-150">
+                    <button onclick="switchRole(${u.id}); closeModal('role-modal')" class="w-full text-left p-4 bg-${color}-50 hover:bg-${color}-100 card border border-${color}-200 transition duration-150">
                         <p class="font-bold text-${color}-700 flex items-center capitalize"><i data-lucide="${icon}" class="w-5 h-5 mr-2"></i> ${u.role} (${u.name})</p>
                         <p class="text-sm text-${color}-600 mt-1">${description}</p>
                     </button>
@@ -358,6 +298,8 @@
         // --- VIEW RENDERERS ---
         function renderEmployeeTable() {
             const tableBody = document.getElementById('employee-expense-table');
+            if (!window.currentRoleUser) return;
+            
             const userIdToFilter = window.currentRoleUser.id; 
             
             const employeeExpenses = window.allExpenses
@@ -365,7 +307,7 @@
                 .sort((a, b) => new Date(b.date) - new Date(a.date));
             
             if (employeeExpenses.length === 0) {
-                tableBody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-stone-500">No expenses found for ${window.currentRoleUser.name}.</td></tr>`;
+                tableBody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-stone-500">No expenses found for ${window.currentRoleUser.name}. Start by submitting a claim!</td></tr>`;
                 return;
             }
 
@@ -380,22 +322,25 @@
             `).join('');
         }
 
-        function renderManagerTables() {
+        function renderManagerApprovals() {
             const managerId = window.currentRoleUser ? window.currentRoleUser.id : null;
             const approvalTable = document.getElementById('manager-approval-table');
-            const teamTable = document.getElementById('manager-team-table');
+            
+            if (!managerId) {
+                approvalTable.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-stone-500">Please select a manager role.</td></tr>`;
+                return;
+            }
             
             // Find all employees managed by the current manager's ID
             const teamIds = window.allUserRoles.filter(u => u.managerId === managerId).map(u => u.id); 
-            const teamExpenses = window.allExpenses
-                .filter(e => teamIds.includes(e.userId))
-                .sort((a, b) => new Date(b.date) - new Date(a.date));
             
             // Approval Queue: Pending expenses from the team
-            const pendingApprovals = teamExpenses.filter(e => e.status === 'Pending');
+            const pendingApprovals = window.allExpenses
+                .filter(e => teamIds.includes(e.userId) && e.status === 'Pending')
+                .sort((a, b) => new Date(a.submittedAt) - new Date(b.submittedAt)); // Sort by oldest first
 
             if (pendingApprovals.length === 0) {
-                approvalTable.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-stone-500">No pending approvals!</td></tr>`;
+                approvalTable.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-stone-500">No pending approvals! Good job, team.</td></tr>`;
             } else {
                 approvalTable.innerHTML = pendingApprovals.map(e => `
                     <tr class="border-b hover:bg-stone-50">
@@ -403,7 +348,7 @@
                         <td class="px-6 py-3">${e.date}</td>
                         <td class="px-6 py-3">${e.description}</td>
                         <td class="px-6 py-3 text-right">
-                            $${(e.amount * (window.USD_RATE_MOCK[e.currency] || 1)).toFixed(2)} USD
+                            <span class="font-semibold text-green-700">$${(e.amount * (window.USD_RATE_MOCK[e.currency] || 1)).toFixed(2)}</span> USD
                         </td>
                         <td class="px-6 py-3 text-center space-x-2">
                             <button onclick="handleApproval('${e.docId}', 'Approved')" class="text-green-600 hover:text-green-800 font-medium p-1 rounded-lg">Approve</button>
@@ -412,77 +357,18 @@
                     </tr>
                 `).join('');
             }
-
-            // Team History: All expenses from the team
-            if (teamExpenses.length === 0) {
-                teamTable.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-stone-500">No team expense history found.</td></tr>`;
-            } else {
-                teamTable.innerHTML = teamExpenses.map(e => `
-                    <tr class="border-b hover:bg-stone-50">
-                        <td class="px-6 py-3">${getUserById(e.userId).name}</td>
-                        <td class="px-6 py-3">${e.date}</td>
-                        <td class="px-6 py-3">${e.description}</td>
-                        <td class="px-6 py-3 text-right">${e.amount.toFixed(2)} ${e.currency}</td>
-                        <td class="px-6 py-3 text-center">${getStatusBadge(e.status)}</td>
-                    </tr>
-                `).join('');
-            }
         }
 
-        // --- CHART RENDERER ---
-        let statusChart, categoryChart;
-        
-        function calculateChartData() {
-            const statusCounts = window.allExpenses.reduce((acc, e) => {
-                acc[e.status] = (acc[e.status] || 0) + 1;
-                return acc;
-            }, {});
+        function renderAdminSummary() {
+            const totalClaims = window.allExpenses.length;
+            const approvedSpend = window.allExpenses
+                .filter(e => e.status === 'Approved')
+                .reduce((total, e) => total + (e.amount * (window.USD_RATE_MOCK[e.currency] || 1)), 0);
+            const pendingCount = window.allExpenses.filter(e => e.status === 'Pending').length;
 
-            const categoryTotals = window.allExpenses.reduce((acc, e) => {
-                const usdAmount = e.amount * (window.USD_RATE_MOCK[e.currency] || 1);
-                acc[e.category] = (acc[e.category] || 0) + usdAmount;
-                return acc;
-            }, {});
-            
-            return { statusCounts, categoryTotals };
-        }
-
-        function renderAdminCharts() {
-            const { statusCounts, categoryTotals } = calculateChartData();
-
-            // 1. Status Chart
-            const statusCtx = document.getElementById('statusChart');
-            if (!statusCtx) return;
-            if (statusChart) statusChart.destroy();
-            statusChart = new Chart(statusCtx.getContext('2d'), {
-                type: 'doughnut',
-                data: {
-                    labels: Object.keys(statusCounts),
-                    datasets: [{
-                        data: Object.values(statusCounts),
-                        backgroundColor: ['#10b981', '#f59e0b', '#ef4444', '#a8a29e'], // Green, Amber, Red, Stone
-                        hoverOffset: 4
-                    }]
-                },
-                options: { responsive: true, plugins: { legend: { position: 'top' }, title: { display: false } } }
-            });
-
-            // 2. Category Chart
-            const categoryCtx = document.getElementById('categoryChart');
-            if (!categoryCtx) return;
-            if (categoryChart) categoryChart.destroy();
-            categoryChart = new Chart(categoryCtx.getContext('2d'), {
-                type: 'bar',
-                data: {
-                    labels: Object.keys(categoryTotals),
-                    datasets: [{
-                        label: 'Total Spent (USD)',
-                        data: Object.values(categoryTotals).map(v => v.toFixed(2)),
-                        backgroundColor: '#4f46e5', // Indigo
-                    }]
-                },
-                options: { responsive: true, scales: { y: { beginAtZero: true } }, plugins: { legend: { display: false }, title: { display: false } } }
-            });
+            document.getElementById('admin-total-claims').textContent = totalClaims;
+            document.getElementById('admin-approved-spend').textContent = '$' + approvedSpend.toFixed(2);
+            document.getElementById('admin-pending-count').textContent = pendingCount;
         }
         
         // --- VIEW CONTROLLERS ---
@@ -493,7 +379,8 @@
 
             if (user) {
                 window.currentRoleUser = user;
-                window.switchView(user.role);
+                // Once role is selected, switch to the correct view based on the role
+                window.switchView(user.role); 
             } else {
                 showStatusMessage('Error', 'User ID not found in mock data.', 'red');
             }
@@ -507,23 +394,14 @@
             const targetView = document.getElementById(`${viewName}-view`);
             if (targetView) targetView.classList.add('active');
 
-            document.querySelectorAll('.nav-btn').forEach(b => {
-                 b.classList.remove('bg-indigo-100', 'text-indigo-700');
-                 b.classList.add('text-stone-600');
-            });
-            const activeBtn = document.querySelector(`.nav-btn[data-role="${viewName}"]`);
-            if (activeBtn) {
-                activeBtn.classList.add('bg-indigo-100', 'text-indigo-700');
-            }
-
             // Update data based on the new role
             updateUserInfoDisplay();
             if (viewName === 'employee') {
                 renderEmployeeTable();
             } else if (viewName === 'manager') {
-                renderManagerTables();
+                renderManagerApprovals();
             } else if (viewName === 'admin') {
-                renderAdminCharts();
+                renderAdminSummary();
             }
         }
 
@@ -536,13 +414,10 @@
             if (index !== -1) {
                 // Update the local array
                 window.allExpenses[index].status = newStatus;
-                window.allExpenses[index].managerId = window.currentRoleUser.id;
                 
                 showStatusMessage('Success', `Expense ${newStatus} successfully! (Mock update)`, 'green');
                 // Re-render the manager view to reflect the change
-                renderManagerTables(); 
-                // Force admin chart re-render if visible
-                if (window.currentView === 'admin') renderAdminCharts();
+                renderManagerApprovals(); 
             } else {
                 showStatusMessage('Error', 'Mock expense not found.', 'red');
             }
@@ -556,6 +431,11 @@
             
             // Generate a unique (mock) ID
             const newDocId = 'e' + (window.allExpenses.length + 1);
+
+            if (!window.currentRoleUser) {
+                showStatusMessage('Error', 'No user role selected. Please select a role first.', 'red');
+                return;
+            }
 
             const newExpense = {
                 docId: newDocId,
@@ -576,19 +456,11 @@
             e.target.reset();
             showStatusMessage('Success', 'Your expense claim has been submitted successfully! (Mock submission)', 'green');
             
-            // Re-render the employee view to reflect the new claim
-            renderEmployeeTable();
-            if (window.currentView === 'manager') renderManagerTables(); // Manager should see it instantly
+            // Re-render the current view
+            if (window.currentView === 'employee') renderEmployeeTable();
+            if (window.currentView === 'manager') renderManagerApprovals();
+            if (window.currentView === 'admin') renderAdminSummary();
         });
-
-        // --- MOCK ADMIN FUNCTIONS ---
-        window.addFlowStep = () => {
-             // Mock function for demo purposes
-             showStatusMessage('Demo Feature', 'This demonstrates adding a new step to the workflow.', 'amber');
-        }
-        window.toggleConditional = (checkbox) => {
-             document.getElementById('conditional-rules').style.display = checkbox.checked ? 'block' : 'none';
-        }
 
 
         // --- GENERIC MODAL HANDLERS ---
@@ -597,10 +469,10 @@
 
         // --- INITIALIZATION ---
         document.addEventListener('DOMContentLoaded', () => {
-            // Render role selector on startup
+            // 1. Render role selector buttons
             renderRoleSelector();
-            // Set initial view
-            switchView(window.currentRoleUser.role);
+            
+            // 2. Open the role selection modal immediately (The HTML initializes it as 'flex' for immediate visibility)
         });
     </script>
 
