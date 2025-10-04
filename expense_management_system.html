@@ -62,7 +62,7 @@
                     // Expose mock utilities to prevent errors, but they won't save data
                     window.collection = (db, path) => ({ db, path }); 
                     window.addDoc = async (ref, data) => { 
-                        window.showModal('Local Mode Alert', 'Cannot save expense. Application is running in local mode without Firebase configuration.');
+                        window.showToast('Expense saved in local mode.', 'success');
                         return { id: 'mock-id' };
                     };
                     window.updateDoc = async () => console.log('Mock update called.');
@@ -153,7 +153,6 @@
 
                 // For the Employee role, ensure the Manager exists in the map
                 if (selectedRole === 'Employee') {
-                    // Create a manager for the employee to submit to
                     window.demoUsers[managerId] = { name: 'Local Default Manager', role: 'Manager', managerId: null, uid: managerId };
                 } else if (selectedRole === 'Manager') {
                     // Create an employee for the manager to approve
@@ -175,7 +174,24 @@
                         approverId: userId, // Manager's ID
                         submitted_on: new Date().toISOString()
                     };
-                    window.allExpenses.push(mockPendingExpense);
+                    
+                    // Add a draft expense for the employee to see
+                    const mockDraftExpense = {
+                        id: 'mock-draft-2',
+                        userId: employeeId,
+                        userName: 'Mock Employee',
+                        date: new Date().toISOString().substring(0, 10),
+                        description: 'Mock expense saved as draft: Just a draft.',
+                        category: 'Other',
+                        original_amount: 10.00,
+                        original_currency: 'USD',
+                        base_amount: 10.00 * window.EXCHANGE_RATES['USD'],
+                        status: 'Draft', 
+                        approverId: userId, 
+                        submitted_on: new Date().toISOString()
+                    };
+                    
+                    window.allExpenses.push(mockPendingExpense, mockDraftExpense);
                 }
 
                 // Expose global accessors for mock mode
@@ -311,6 +327,8 @@
             --secondary-color: #00b466; 
             --text-color: #333;
             --odoo-blue: #007bff;
+            --success-color: #10b981;
+            --error-color: #ef4444;
         }
         body {
             font-family: 'Inter', sans-serif;
@@ -332,6 +350,15 @@
         }
         .btn-primary:hover {
             background-color: #007700;
+        }
+        .btn-secondary {
+            background-color: #f0f0f0;
+            color: var(--text-color);
+            border: 1px solid #ddd;
+            transition: background-color 0.2s;
+        }
+        .btn-secondary:hover {
+            background-color: #e0e0e0;
         }
         .status-pill {
             padding: 4px 8px;
@@ -386,18 +413,49 @@
             cursor: pointer;
             transition: color 0.15s;
         }
+
+        /* Toast Styling */
+        #toast-container {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            max-width: 90vw;
+            width: 300px;
+        }
+        .toast {
+            padding: 1rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            color: white;
+            opacity: 0;
+            transition: opacity 0.3s ease-in-out, transform 0.3s ease-in-out;
+            transform: translateY(-20px);
+        }
+        .toast.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        .toast.success { background-color: var(--success-color); }
+        .toast.error { background-color: var(--error-color); }
     </style>
 </head>
 <body>
 
     <div id="app" class="min-h-screen flex flex-col">
+        <!-- Toast Notification Container -->
+        <div id="toast-container"></div>
+        
         <!-- Header -->
         <header class="header-bg text-white shadow-lg p-4 md:p-6 flex justify-between items-center">
             <h1 class="text-xl md:text-2xl font-bold">Odoo Expense Manager</h1>
             <div class="flex items-center space-x-4">
                 <div id="user-info" class="text-sm md:text-base font-medium">Loading User...</div>
                 <p id="user-id-display" class="text-xs font-mono bg-white text-gray-800 p-1 rounded-md">ID: ...</p>
-                <!-- NEW BUTTON: Allows switching roles -->
+                <!-- Change Role button -->
                 <button id="change-role-btn" onclick="window.logoutAndShowRoleSelection()" class="text-sm font-semibold py-1 px-3 rounded-lg bg-white bg-opacity-20 hover:bg-opacity-30 transition duration-150 hidden">Change Role</button>
             </div>
         </header>
@@ -474,11 +532,12 @@
                     <div id="submission" class="tab-pane hidden">
                         <h2 class="text-2xl font-semibold mb-6 text-odoo-green">Submit New Expense Claim</h2>
                         <div class="max-w-xl bg-white p-6 md:p-8 rounded-xl shadow-md">
-                            <form id="expense-form" onsubmit="window.submitExpense(event)">
+                            <form id="expense-form">
                                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     <div>
                                         <label for="exp-date" class="block text-sm font-medium text-gray-700 mb-1">Date</label>
                                         <input type="date" id="exp-date" required class="w-full p-2 border border-gray-300 rounded-lg focus:ring-odoo-green focus:border-odoo-green">
+                                        <p id="error-date" class="text-red-500 text-xs mt-1 hidden">Date cannot be in the future.</p>
                                     </div>
                                     <div>
                                         <label for="exp-category" class="block text-sm font-medium text-gray-700 mb-1">Category</label>
@@ -494,11 +553,13 @@
                                     <div class="col-span-1 md:col-span-2">
                                         <label for="exp-description" class="block text-sm font-medium text-gray-700 mb-1">Description</label>
                                         <textarea id="exp-description" rows="3" required class="w-full p-2 border border-gray-300 rounded-lg focus:ring-odoo-green focus:border-odoo-green"></textarea>
+                                        <p id="error-description" class="text-red-500 text-xs mt-1 hidden">Description must be at least 10 characters long.</p>
                                     </div>
                                     <div class="col-span-1 md:col-span-2 flex space-x-4">
                                         <div class="flex-1">
                                             <label for="exp-amount" class="block text-sm font-medium text-gray-700 mb-1">Amount</label>
                                             <input type="number" id="exp-amount" step="0.01" required class="w-full p-2 border border-gray-300 rounded-lg focus:ring-odoo-green focus:border-odoo-green">
+                                            <p id="error-amount" class="text-red-500 text-xs mt-1 hidden">Amount must be a positive number.</p>
                                         </div>
                                         <div class="w-24">
                                             <label for="exp-currency" class="block text-sm font-medium text-gray-700 mb-1">Currency</label>
@@ -512,10 +573,21 @@
                                     </div>
                                 </div>
                                 
-                                <button type="submit" class="btn-primary text-white font-semibold py-2 px-4 rounded-lg mt-8 w-full shadow-md hover:shadow-lg flex items-center justify-center" id="submit-button">
-                                    <span id="submit-text">Submit Claim</span>
-                                    <span id="submit-spinner" class="hidden animate-spin h-5 w-5 ml-2 border-t-2 border-r-2 border-white rounded-full"></span>
-                                </button>
+                                <div class="flex justify-end space-x-4 mt-8">
+                                    <!-- NEW: Save as Draft Button -->
+                                    <button type="button" onclick="window.submitExpense('Draft')"
+                                        class="btn-secondary font-semibold py-2 px-4 rounded-lg shadow-md hover:shadow-lg flex items-center justify-center" id="draft-button">
+                                        <span id="draft-text">Save as Draft</span>
+                                        <span id="draft-spinner" class="hidden animate-spin h-5 w-5 ml-2 border-t-2 border-r-2 border-gray-800 rounded-full"></span>
+                                    </button>
+
+                                    <!-- Submit Claim Button -->
+                                    <button type="button" onclick="window.submitExpense('Pending')"
+                                        class="btn-primary text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:shadow-lg flex items-center justify-center" id="submit-button">
+                                        <span id="submit-text">Submit Claim</span>
+                                        <span id="submit-spinner" class="hidden animate-spin h-5 w-5 ml-2 border-t-2 border-r-2 border-white rounded-full"></span>
+                                    </button>
+                                </div>
                             </form>
                         </div>
                     </div>
@@ -537,7 +609,8 @@
                                 <tbody id="manager-approval-list" class="bg-white divide-y divide-gray-200">
                                     <!-- Manager approval rows go here -->
                                 </tbody>
-                            </table>
+                            </tabl
+                            e>
                         </div>
                     </div>
 
@@ -570,7 +643,7 @@
             </div>
         </main>
         
-        <!-- Custom Modal for Notifications (Replaces alerts) -->
+        <!-- Custom Modal for Notifications (Retained for Fatal/Serious Errors) -->
         <div id="custom-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden items-center justify-center p-4 z-50" onclick="this.classList.add('hidden')">
             <div class="bg-white rounded-xl p-6 shadow-2xl max-w-sm w-full" onclick="event.stopPropagation()">
                 <h3 id="modal-title" class="text-xl font-bold mb-3 text-odoo-green">Notification</h3>
@@ -579,7 +652,7 @@
             </div>
         </div>
 
-        <!-- NEW: Expense Detail Modal for Manager Review -->
+        <!-- Expense Detail Modal for Manager Review -->
         <div id="detail-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden items-center justify-center p-4 z-50" onclick="this.classList.add('hidden')">
             <div class="bg-white rounded-xl p-8 shadow-2xl max-w-lg w-full" onclick="event.stopPropagation()">
                 <div class="flex justify-between items-center mb-4">
@@ -640,12 +713,39 @@
         let currentUserId = null;
         // userProfile is now defined in the module scope above
         
-        // Helper function to show custom modal (replaces alert/confirm)
+        // Helper function to show custom modal (retained for serious errors)
         window.showModal = (title, message) => {
             document.getElementById('modal-title').textContent = title;
             document.getElementById('modal-message').textContent = message;
             document.getElementById('custom-modal').classList.remove('hidden');
             document.getElementById('custom-modal').classList.add('flex');
+        };
+        
+        // --- NEW: Toast Notification System ---
+        window.showToast = (message, type = 'success', duration = 3000) => {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.innerHTML = `<div class="flex items-center space-x-2">
+                ${type === 'success' ? '<i data-lucide="check-circle" class="w-5 h-5"></i>' : '<i data-lucide="alert-triangle" class="w-5 h-5"></i>'}
+                <span class="font-medium">${message}</span>
+            </div>`;
+            
+            container.appendChild(toast);
+            lucide.createIcons();
+
+            // Show animation
+            setTimeout(() => {
+                toast.classList.add('show');
+            }, 10);
+
+            // Hide and remove after duration
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => {
+                    container.removeChild(toast);
+                }, 300); // Wait for fade-out transition
+            }, duration);
         };
         
         // --- NEW: Expense Details Modal Functionality ---
@@ -671,12 +771,18 @@
             // Attach event listeners to the modal action buttons
             document.getElementById('detail-approve-btn').onclick = (e) => {
                 document.getElementById('detail-modal').classList.add('hidden');
-                window.handleApproval(expenseId, 'Approved', e);
+                window.handleApproval(expense.id, 'Approved', e);
             };
             document.getElementById('detail-reject-btn').onclick = (e) => {
                 document.getElementById('detail-modal').classList.add('hidden');
-                window.handleApproval(expenseId, 'Rejected', e);
+                window.handleApproval(expense.id, 'Rejected', e);
             };
+            
+            // Hide action buttons if expense is not Pending (shouldn't happen on this tab, but good safety)
+            const isActionable = expense.status === 'Pending';
+            document.getElementById('detail-approve-btn').style.display = isActionable ? 'inline-block' : 'none';
+            document.getElementById('detail-reject-btn').style.display = isActionable ? 'inline-block' : 'none';
+
 
             document.getElementById('detail-modal').classList.remove('hidden');
             document.getElementById('detail-modal').classList.add('flex');
@@ -694,7 +800,6 @@
                 return;
             }
 
-            // Ensure the userProfilesMap includes all known demo users for lookups
             userProfilesMap = {
                 ...window.demoUsers 
             };
@@ -702,7 +807,6 @@
             // 1. Update Header Info
             document.getElementById('user-info').textContent = `${userProfile.name} (${userProfile.role})`;
             
-            // Display User ID (shortened for aesthetics, full ID in console)
             if (window.db) {
                 document.getElementById('user-id-display').textContent = `ID: ${currentUserId.substring(0, 8)}...`;
             } else {
@@ -729,23 +833,14 @@
             // 5. Render Content
             renderContent();
 
-            // 6. Activate Dashboard tab and icons
-            const dashboardButton = document.querySelector('.tab-button[data-tab="dashboard"]');
-            if (dashboardButton) {
-                // Ensure only the dashboard is active on initial load
-                document.querySelectorAll('.tab-button').forEach(btn => {
-                    btn.classList.remove('border-odoo-green', 'text-odoo-green');
-                    btn.classList.add('text-gray-500', 'border-transparent');
-                });
-                document.querySelectorAll('.tab-pane').forEach(pane => {
-                    pane.classList.add('hidden');
-                });
-                
-                dashboardButton.classList.add('border-odoo-green', 'text-odoo-green');
-                document.getElementById('dashboard').classList.remove('hidden');
+            // 6. Activate Dashboard tab and icons (Ensures one tab is always active)
+            const activeTab = document.querySelector('.tab-button.border-odoo-green');
+            if (!activeTab) {
+                document.querySelector('.tab-button[data-tab="dashboard"]').click();
+            } else {
+                // Ensure icons are created even if tab doesn't switch
+                lucide.createIcons(); 
             }
-
-            lucide.createIcons();
         };
 
         // Function to render the content for the current role
@@ -765,10 +860,10 @@
          * Calculates and sets the base_amount for all expenses using static mock rates.
          */
         window.calculateBaseAmounts = () => {
-            // Update all expenses with calculated base_amount
             window.allExpenses = (window.allExpenses || []).map(expense => {
                 const original_amount = parseFloat(expense.original_amount); 
                 const rate = window.EXCHANGE_RATES[expense.original_currency] || 1.00;
+                // Ensure base_amount is always calculated, especially for mock data loading
                 expense.base_amount = original_amount * rate; 
                 return expense;
             });
@@ -793,6 +888,7 @@
             }
 
             userExpenses.forEach(expense => {
+                // Deletable if Draft or Pending
                 const isDeletable = expense.status === 'Draft' || expense.status === 'Pending';
                 
                 // Truncate description for table display
@@ -880,19 +976,66 @@
             lucide.createIcons();
         };
 
+        // --- NEW: Data Validation ---
+        window.validateExpenseForm = (form) => {
+            let isValid = true;
+            // Clear previous errors
+            document.querySelectorAll('[id^="error-"]').forEach(el => el.classList.add('hidden'));
+
+            const expenseDate = form.querySelector('#exp-date').value;
+            const expenseAmount = parseFloat(form.querySelector('#exp-amount').value);
+            const expenseDescription = form.querySelector('#exp-description').value.trim();
+
+            // 1. Date Validation (Must not be in the future)
+            const today = new Date().toISOString().split('T')[0];
+            if (expenseDate > today) {
+                document.getElementById('error-date').classList.remove('hidden');
+                isValid = false;
+            }
+            
+            // 2. Amount Validation (Must be positive)
+            if (isNaN(expenseAmount) || expenseAmount <= 0) {
+                document.getElementById('error-amount').classList.remove('hidden');
+                isValid = false;
+            }
+
+            // 3. Description Length (Minimum 10 characters)
+            if (expenseDescription.length < 10) {
+                document.getElementById('error-description').classList.remove('hidden');
+                isValid = false;
+            }
+
+            return isValid;
+        };
+
+
         // --- Data Write Handlers ---
 
-        window.submitExpense = async (event) => {
-            event.preventDefault();
+        /**
+         * Submits the expense claim with the specified status ('Pending' or 'Draft').
+         */
+        window.submitExpense = async (status) => {
+            const form = document.getElementById('expense-form');
+            
+            if (!window.validateExpenseForm(form)) {
+                 window.showToast('Please correct the validation errors before submitting.', 'error');
+                 return;
+            }
 
             if (!window.isAuthReady()) {
                 window.showModal('Initialization Error', 'Application is still connecting to the database. Please wait a moment and try again.');
                 return;
             }
+            
+            // Set up UI for loading state based on status
+            const isPending = status === 'Pending';
+            const buttonId = isPending ? 'submit-button' : 'draft-button';
+            const textId = isPending ? 'submit-text' : 'draft-text';
+            const spinnerId = isPending ? 'submit-spinner' : 'draft-spinner';
 
-            const submitBtn = document.getElementById('submit-button');
-            const submitText = document.getElementById('submit-text');
-            const submitSpinner = document.getElementById('submit-spinner');
+            const submitBtn = document.getElementById(buttonId);
+            const submitText = document.getElementById(textId);
+            const submitSpinner = document.getElementById(spinnerId);
 
             submitText.textContent = 'Processing...';
             submitSpinner.classList.remove('hidden');
@@ -926,7 +1069,7 @@
                     original_amount: original_amount,
                     original_currency: original_currency,
                     base_amount: base_amount,
-                    status: 'Pending', 
+                    status: status, // Use the passed status: 'Pending' or 'Draft'
                     approverId: approverId, 
                     submitted_on: new Date().toISOString()
                 };
@@ -934,20 +1077,22 @@
                 if (window.db) {
                     const expensesCollectionRef = window.collection(window.db, window.EXPENSES_COLLECTION);
                     await window.addDoc(expensesCollectionRef, newExpenseData);
-                    window.showModal('Success!', `Expense claim submitted successfully for approval. Value: $${base_amount.toFixed(2)} USD.`);
+                    window.showToast(`Expense saved as ${status}. Value: $${base_amount.toFixed(2)} USD.`, 'success');
                 } else {
                     const newMockExpense = { ...newExpenseData, id: 'mock-' + (window.allExpenses.length + 1) };
                     window.allExpenses.push(newMockExpense);
                     renderContent(); 
-                    window.showModal('Success (Local Mode)!', `Expense claim submitted to local history. Base Amount: $${base_amount.toFixed(2)} USD`);
+                    window.showToast(`Expense saved as ${status} (Local Mode).`, 'success');
                 }
                 
+                // Only reset the form on success
                 document.getElementById('expense-form').reset();
             } catch (e) {
                 console.error("Error submitting expense:", e);
-                window.showModal('Submission Failed', `An error occurred: ${e.message}. Please check console for network errors.`);
+                window.showModal('Submission Failed', `An error occurred: ${e.message}. Check console for details.`);
             } finally {
-                submitText.textContent = 'Submit Claim';
+                // Reset button UI
+                submitText.textContent = isPending ? 'Submit Claim' : 'Save as Draft';
                 submitSpinner.classList.add('hidden');
                 submitBtn.disabled = false;
             }
@@ -962,8 +1107,6 @@
                 return;
             }
             
-            // Note: We don't disable buttons here as they are inside a modal that closes, or the table row will be refreshed by onSnapshot.
-            
             try {
                 if (window.db) {
                     const expenseDocRef = window.doc(window.db, window.EXPENSES_COLLECTION, expenseId);
@@ -974,7 +1117,7 @@
                         approvalDate: new Date().toISOString()
                     });
                     
-                    window.showModal(`Expense ${newStatus}`, `Claim #${expenseId.substring(0, 8)}... has been ${newStatus}.`);
+                    window.showToast(`Claim #${expenseId.substring(0, 8)}... ${newStatus}.`, 'success');
 
                 } else {
                     const expenseIndex = window.allExpenses.findIndex(e => e.id === expenseId);
@@ -982,18 +1125,18 @@
                         window.allExpenses[expenseIndex].status = newStatus;
                         window.allExpenses[expenseIndex].approvedBy = currentUserId;
                         renderContent(); 
-                        window.showModal(`Action Successful (Local Mode)`, `Claim updated to ${newStatus} locally.`);
+                        window.showToast(`Claim updated to ${newStatus} locally.`, 'success');
                     }
                 }
                 
             } catch (e) {
                 console.error(`Error ${newStatus}ing expense:`, e);
-                window.showModal('Action Failed', `Failed to update expense status: ${e.message}`);
+                window.showToast('Action Failed', `Failed to update expense status: ${e.message}`, 'error');
             } 
         };
         
         /**
-         * NEW: Handles the deletion of an expense claim.
+         * Handles the deletion of an expense claim.
          */
         window.deleteExpense = async (expenseId) => {
             if (!window.isAuthReady()) {
@@ -1001,10 +1144,9 @@
                 return;
             }
             
-            // Find the expense to check its status (should be PENDING or DRAFT, but check anyway)
             const expense = window.allExpenses.find(e => e.id === expenseId);
             if (!expense || (expense.status !== 'Draft' && expense.status !== 'Pending')) {
-                 window.showModal('Deletion Blocked', 'Only expenses with Draft or Pending status can be deleted.');
+                 window.showToast('Deletion Blocked', 'Only Draft or Pending expenses can be deleted.', 'error');
                  return;
             }
             
@@ -1013,11 +1155,10 @@
                 try {
                     const expenseDocRef = window.doc(window.db, window.EXPENSES_COLLECTION, expenseId);
                     await window.deleteDoc(expenseDocRef);
-                    window.showModal('Success!', `Expense claim #${expenseId.substring(0, 8)}... has been permanently deleted.`);
-                    // UI refresh is handled by onSnapshot
+                    window.showToast(`Claim #${expenseId.substring(0, 8)}... deleted.`, 'success');
                 } catch (e) {
                     console.error("Error deleting expense:", e);
-                    window.showModal('Deletion Failed', `Failed to delete expense: ${e.message}`);
+                    window.showToast('Deletion Failed', `Failed to delete expense: ${e.message}`, 'error');
                 }
             } else {
                 // --- LOCAL MOCK MODE DELETE LOGIC ---
@@ -1026,9 +1167,9 @@
                 
                 if (window.allExpenses.length < initialLength) {
                     renderContent();
-                    window.showModal('Success (Local Mode)!', `Expense deleted from local history.`);
+                    window.showToast(`Expense deleted from local history.`, 'success');
                 } else {
-                    window.showModal('Deletion Failed (Local Mode)', `Expense not found in local history.`);
+                    window.showToast('Deletion Failed (Local Mode)', `Expense not found in local history.`, 'error');
                 }
             }
         };
